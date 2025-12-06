@@ -10,7 +10,7 @@ import {
 } from 'recharts';
 import {
     Activity, ArrowLeft, AlertTriangle, Calendar, FileText,
-    CheckCircle, Zap, Settings, TrendingUp, Droplets, RefreshCcw
+    CheckCircle, Zap, Settings, TrendingUp, Droplets, RefreshCcw, Wrench
 } from 'lucide-react';
 import Link from 'next/link';
 import { api } from "@/lib/api";
@@ -155,11 +155,11 @@ export default function SensorDetailPage(props: { params: Promise<{ id: string }
                         </Button>
                         <Button
                             className="bg-primary hover:bg-primary-end text-white"
-                            onClick={() => setIsReportModalOpen(true)}
+                            onClick={() => window.location.href = `/maintenance?sensorId=${sensorId}&action=new`}
                             disabled={!hasData}
                         >
-                            <Calendar className="w-4 h-4 mr-2" />
-                            Schedule Replacement
+                            <Wrench className="w-4 h-4 mr-2" />
+                            Schedule Maintenance
                         </Button>
                     </div>
                 </div>
