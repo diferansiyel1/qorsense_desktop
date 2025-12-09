@@ -1,20 +1,31 @@
 """
-Sensor Management Routes
+Sensor Management Routes - Multi-Tenant Secured
 
 Handles sensor CRUD operations, data ingestion, and history retrieval.
 Features streaming CSV import with Pydantic validation for industrial-grade data ingestion.
+
+Security:
+- All endpoints require authentication
+- Row-level security: Users can only see/modify their organization's sensors
+- Role-based access: DELETE requires ORG_ADMIN or SUPER_ADMIN
 """
 
-from typing import List
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, BackgroundTasks
+from typing import List, Optional
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, BackgroundTasks, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, insert, desc, func
+from sqlalchemy import select, insert, desc, func, delete
 from backend.database import get_db, AsyncSessionLocal
-from backend.models_db import Sensor, SensorReading, AnalysisResultDB, SourceType
+from backend.models_db import Sensor, SensorReading, AnalysisResultDB, SourceType, Role, User
 from backend.models import SensorCreate, SensorResponse, AnalysisResult, AnalysisMetrics
 from backend.schemas.common import PaginationParams, PaginatedResponse
 from backend.schemas.sensor import SensorReadingBulk, CSVImportResult
-from backend.api.deps import DevUser, DbSession
+from backend.api.deps import (
+    DbSession,
+    CurrentUser,
+    CurrentActiveUser,
+    RoleChecker,
+    get_current_active_user,
+)
 from datetime import datetime
 import logging
 import csv
@@ -27,20 +38,87 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sensors", tags=["Sensors"])
 
 
+# ==============================================================================
+# HELPER FUNCTIONS
+# ==============================================================================
+
+async def get_sensor_with_org_check(
+    sensor_id: str,
+    user: User,
+    db: AsyncSession
+) -> Sensor:
+    """
+    Get sensor by ID with organization ownership check.
+    
+    Args:
+        sensor_id: Sensor ID to fetch
+        user: Current authenticated user
+        db: Database session
+        
+    Returns:
+        Sensor object if found and user has access
+        
+    Raises:
+        HTTPException 404: Sensor not found or not owned by user's organization
+    """
+    result = await db.execute(
+        select(Sensor).where(Sensor.id == sensor_id)
+    )
+    sensor = result.scalar_one_or_none()
+    
+    if sensor is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Sensör bulunamadı: {sensor_id}"
+        )
+    
+    # SUPER_ADMIN can access all
+    if user.role == Role.SUPER_ADMIN:
+        return sensor
+    
+    # Check organization membership
+    if sensor.organization_id != user.organization_id:
+        # Return 404 instead of 403 to not leak sensor existence
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Sensör bulunamadı: {sensor_id}"
+        )
+    
+    return sensor
+
+
+# ==============================================================================
+# LIST / READ ENDPOINTS
+# ==============================================================================
+
 @router.get("", response_model=PaginatedResponse[SensorResponse])
 async def get_sensors(
     pagination: PaginationParams = Depends(),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     """
-    List sensors with pagination.
-    """
-    # Count total
-    count_stmt = select(func.count()).select_from(Sensor)
-    total = await db.scalar(count_stmt)
+    List sensors with pagination - filtered by organization.
     
-    # Get items
-    stmt = select(Sensor).offset((pagination.page - 1) * pagination.size).limit(pagination.size)
+    Users can only see sensors belonging to their organization.
+    SUPER_ADMIN can see all sensors.
+    
+    **Authentication**: Required
+    """
+    # Build base query with organization filter
+    base_query = select(Sensor)
+    count_query = select(func.count()).select_from(Sensor)
+    
+    # Apply org filter (SUPER_ADMIN sees all)
+    if current_user.role != Role.SUPER_ADMIN:
+        base_query = base_query.where(Sensor.organization_id == current_user.organization_id)
+        count_query = count_query.where(Sensor.organization_id == current_user.organization_id)
+    
+    # Count total
+    total = await db.scalar(count_query)
+    
+    # Get items with pagination
+    stmt = base_query.offset((pagination.page - 1) * pagination.size).limit(pagination.size)
     result = await db.execute(stmt)
     sensors = result.scalars().all()
     
@@ -66,50 +144,52 @@ async def get_sensors(
             latest_analysis_timestamp=latest_analysis.timestamp if latest_analysis else None
         )
         sensor_responses.append(response)
-        
+    
+    logger.info(f"User {current_user.email} listed {len(sensor_responses)} sensors")
+    
     return PaginatedResponse(
         items=sensor_responses,
-        total=total,
+        total=total or 0,
         page=pagination.page,
         size=pagination.size,
-        pages=math.ceil(total / pagination.size)
+        pages=math.ceil(total / pagination.size) if total else 0
     )
 
 
-@router.post("", response_model=SensorResponse)
-async def create_sensor(
-    sensor: SensorCreate,
-    db: DbSession,
-    current_user: DevUser = None,
+@router.get("/{sensor_id}", response_model=SensorResponse)
+async def get_sensor(
+    sensor_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     """
-    Create a new sensor.
+    Get a single sensor by ID.
     
-    **Authentication**: Required in production, optional in development.
+    Users can only access sensors belonging to their organization.
+    
+    **Authentication**: Required
     """
-    new_id = str(uuid.uuid4())[:8]
+    sensor = await get_sensor_with_org_check(sensor_id, current_user, db)
     
-    db_sensor = Sensor(
-        id=new_id,
+    # Get latest analysis
+    stmt = (
+        select(AnalysisResultDB)
+        .where(AnalysisResultDB.sensor_id == sensor.id)
+        .order_by(desc(AnalysisResultDB.timestamp))
+        .limit(1)
+    )
+    res = await db.execute(stmt)
+    latest_analysis = res.scalar_one_or_none()
+    
+    return SensorResponse(
+        id=sensor.id,
         name=sensor.name,
         location=sensor.location,
-        source_type=SourceType(sensor.source_type),
-        organization_id=sensor.organization_id
-    )
-    db.add(db_sensor)
-    await db.commit()
-    await db.refresh(db_sensor)
-    
-    logger.info(f"Created sensor: {new_id} - {sensor.name}")
-    return SensorResponse(
-        id=db_sensor.id,
-        name=db_sensor.name,
-        location=db_sensor.location,
-        source_type=db_sensor.source_type,
-        organization_id=db_sensor.organization_id,
-        latest_health_score=100.0,
-        latest_status="Normal",
-        latest_analysis_timestamp=None
+        source_type=sensor.source_type,
+        organization_id=sensor.organization_id,
+        latest_health_score=latest_analysis.health_score if latest_analysis else 100.0,
+        latest_status=latest_analysis.status if latest_analysis else "Normal",
+        latest_analysis_timestamp=latest_analysis.timestamp if latest_analysis else None
     )
 
 
@@ -117,11 +197,19 @@ async def create_sensor(
 async def get_sensor_history(
     sensor_id: str,
     pagination: PaginationParams = Depends(),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     Get paginated analysis history for a sensor.
+    
+    Users can only access history for sensors belonging to their organization.
+    
+    **Authentication**: Required
     """
+    # Verify sensor ownership first
+    await get_sensor_with_org_check(sensor_id, current_user, db)
+    
     # Count total
     count_stmt = (
         select(func.count())
@@ -163,12 +251,153 @@ async def get_sensor_history(
             
     return PaginatedResponse(
         items=history_pydantic,
-        total=total,
+        total=total or 0,
         page=pagination.page,
         size=pagination.size,
         pages=math.ceil(total / pagination.size) if total else 0
     )
 
+
+# ==============================================================================
+# CREATE / UPDATE / DELETE ENDPOINTS  
+# ==============================================================================
+
+@router.post("", response_model=SensorResponse, status_code=status.HTTP_201_CREATED)
+async def create_sensor(
+    sensor: SensorCreate,
+    db: DbSession,
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Create a new sensor.
+    
+    Sensor is automatically assigned to the current user's organization.
+    The organization_id from request body is IGNORED for security.
+    
+    **Authentication**: Required
+    """
+    new_id = str(uuid.uuid4())[:8]
+    
+    # Force organization_id from current user (ignore request body)
+    org_id = current_user.organization_id
+    
+    db_sensor = Sensor(
+        id=new_id,
+        name=sensor.name,
+        location=sensor.location,
+        source_type=SourceType(sensor.source_type),
+        organization_id=org_id  # Always use current user's org
+    )
+    db.add(db_sensor)
+    await db.commit()
+    await db.refresh(db_sensor)
+    
+    logger.info(f"User {current_user.email} created sensor: {new_id} - {sensor.name} for org {org_id}")
+    
+    return SensorResponse(
+        id=db_sensor.id,
+        name=db_sensor.name,
+        location=db_sensor.location,
+        source_type=db_sensor.source_type,
+        organization_id=db_sensor.organization_id,
+        latest_health_score=100.0,
+        latest_status="Normal",
+        latest_analysis_timestamp=None
+    )
+
+
+@router.put("/{sensor_id}", response_model=SensorResponse)
+async def update_sensor(
+    sensor_id: str,
+    sensor_update: SensorCreate,
+    db: DbSession,
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Update an existing sensor.
+    
+    Users can only update sensors belonging to their organization.
+    Organization cannot be changed.
+    
+    **Authentication**: Required
+    """
+    db_sensor = await get_sensor_with_org_check(sensor_id, current_user, db)
+    
+    # Update fields (but never change organization)
+    db_sensor.name = sensor_update.name
+    db_sensor.location = sensor_update.location
+    db_sensor.source_type = SourceType(sensor_update.source_type)
+    
+    await db.commit()
+    await db.refresh(db_sensor)
+    
+    logger.info(f"User {current_user.email} updated sensor: {sensor_id}")
+    
+    # Get latest analysis for response
+    stmt = (
+        select(AnalysisResultDB)
+        .where(AnalysisResultDB.sensor_id == db_sensor.id)
+        .order_by(desc(AnalysisResultDB.timestamp))
+        .limit(1)
+    )
+    res = await db.execute(stmt)
+    latest_analysis = res.scalar_one_or_none()
+    
+    return SensorResponse(
+        id=db_sensor.id,
+        name=db_sensor.name,
+        location=db_sensor.location,
+        source_type=db_sensor.source_type,
+        organization_id=db_sensor.organization_id,
+        latest_health_score=latest_analysis.health_score if latest_analysis else 100.0,
+        latest_status=latest_analysis.status if latest_analysis else "Normal",
+        latest_analysis_timestamp=latest_analysis.timestamp if latest_analysis else None
+    )
+
+
+@router.delete(
+    "/{sensor_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(RoleChecker(["org_admin", "super_admin"]))]
+)
+async def delete_sensor(
+    sensor_id: str,
+    db: DbSession,
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Delete a sensor and all its readings/analysis history.
+    
+    **Authorization**: Requires ORG_ADMIN or SUPER_ADMIN role
+    
+    Users can only delete sensors belonging to their organization.
+    
+    **Authentication**: Required
+    """
+    db_sensor = await get_sensor_with_org_check(sensor_id, current_user, db)
+    
+    # Delete related readings first
+    await db.execute(
+        delete(SensorReading).where(SensorReading.sensor_id == sensor_id)
+    )
+    
+    # Delete related analysis results
+    await db.execute(
+        delete(AnalysisResultDB).where(AnalysisResultDB.sensor_id == sensor_id)
+    )
+    
+    # Delete sensor
+    await db.delete(db_sensor)
+    await db.commit()
+    
+    logger.warning(f"User {current_user.email} (role: {current_user.role.value}) deleted sensor: {sensor_id}")
+    
+    return None
+
+
+# ==============================================================================
+# DATA INGESTION ENDPOINTS
+# ==============================================================================
 
 @router.post("/upload-csv", response_model=CSVImportResult)
 async def upload_csv(
@@ -180,13 +409,15 @@ async def upload_csv(
     chunk_size: int = Form(default=5000, ge=100, le=50000, description="Rows per chunk"),
     skip_errors: bool = Form(default=True, description="Skip invalid rows vs fail fast"),
     db: AsyncSession = Depends(get_db),
-    current_user: DevUser = None,
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     Stream-based CSV import for sensor data with validation.
     
     Industrial-grade ingestion pipeline that processes large CSV files
     in memory-efficient chunks with comprehensive validation.
+    
+    **Security**: User must own the target sensor (organization check)
     
     **Features:**
     - Streaming chunk-based processing (no full file in RAM)
@@ -199,7 +430,7 @@ async def upload_csv(
     - 2 columns: timestamp, value
     - 1 column: value only (timestamp = now)
     
-    **Authentication:** Required in production, optional in development.
+    **Authentication**: Required
     
     Args:
         file: CSV file upload (multipart/form-data)
@@ -210,18 +441,20 @@ async def upload_csv(
         chunk_size: Number of rows to process per batch (default: 5000)
         skip_errors: If True, skip invalid rows; if False, fail on first error
         db: Database session (injected)
-        current_user: Authenticated user (optional in dev)
+        current_user: Authenticated user
         
     Returns:
         CSVImportResult: Detailed import statistics
         
     Raises:
         HTTPException 400: Invalid CSV format or header issues
+        HTTPException 404: Sensor not found or not owned by user
         HTTPException 500: Database or processing error
         
     Example:
         ```
         curl -X POST /sensors/upload-csv \\
+          -H "Authorization: Bearer <token>" \\
           -F "file=@data.csv" \\
           -F "sensor_id=pH-01" \\
           -F "chunk_size=10000"
@@ -230,8 +463,12 @@ async def upload_csv(
     import time
     start_time = time.time()
     
-    user_info = current_user.username if current_user else "anonymous (dev mode)"
-    logger.info(f"CSV upload started for sensor {sensor_id} by user: {user_info}")
+    # ========================================
+    # SECURITY: Verify sensor ownership
+    # ========================================
+    await get_sensor_with_org_check(sensor_id, current_user, db)
+    
+    logger.info(f"CSV upload started for sensor {sensor_id} by user: {current_user.email}")
     
     # Validate file type
     if file.content_type and file.content_type not in [
@@ -386,7 +623,7 @@ async def upload_csv(
         )
         
         logger.info(
-            f"CSV import completed for {sensor_id}: "
+            f"CSV import completed for {sensor_id} by {current_user.email}: "
             f"{imported_rows}/{total_rows} rows imported, "
             f"{failed_rows} failed, {skipped_rows} skipped, "
             f"in {duration_ms}ms ({chunks_processed} chunks)"
@@ -404,6 +641,57 @@ async def upload_csv(
             detail=f"CSV import failed: {str(e)}"
         )
 
+
+@router.post("/stream-data")
+async def stream_data(
+    data: dict,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Stream a single data point and trigger analysis.
+    
+    **Security**: User must own the target sensor (organization check)
+    
+    **Authentication**: Required
+    
+    Args:
+        data: Dictionary with sensor_id, value, and optional timestamp
+        background_tasks: FastAPI background tasks
+        db: Database session
+        current_user: Authenticated user
+        
+    Returns:
+        dict: Reception status
+    """
+    if "sensor_id" not in data or "value" not in data:
+        raise HTTPException(status_code=400, detail="Missing sensor_id or value")
+    
+    sensor_id = data["sensor_id"]
+    
+    # SECURITY: Verify sensor ownership
+    await get_sensor_with_org_check(sensor_id, current_user, db)
+    
+    value = float(data["value"])
+    ts = datetime.fromisoformat(data["timestamp"]) if "timestamp" in data else datetime.now()
+    
+    # Insert reading
+    reading = SensorReading(sensor_id=sensor_id, value=value, timestamp=ts)
+    db.add(reading)
+    await db.commit()
+    
+    # Trigger background analysis
+    from backend.api.routes.analytics import run_background_analysis
+    background_tasks.add_task(run_background_analysis, sensor_id, AsyncSessionLocal)
+    
+    logger.info(f"User {current_user.email} streamed data point for sensor {sensor_id}")
+    return {"status": "received", "sensor_id": sensor_id, "timestamp": ts.isoformat()}
+
+
+# ==============================================================================
+# HELPER FUNCTIONS (Private)
+# ==============================================================================
 
 def _parse_csv_row(
     row: List[str],
@@ -502,44 +790,3 @@ async def _process_chunk(
     except Exception as e:
         logger.error(f"Chunk {chunk_num} insert failed: {e}")
         raise
-
-
-@router.post("/stream-data")
-async def stream_data(
-    data: dict,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-    current_user: DevUser = None,
-):
-    """
-    Stream a single data point and trigger analysis.
-    
-    **Authentication**: Required in production, optional in development.
-    
-    Args:
-        data: Dictionary with sensor_id, value, and optional timestamp
-        background_tasks: FastAPI background tasks
-        db: Database session
-        current_user: Authenticated user (optional in development)
-        
-    Returns:
-        dict: Reception status
-    """
-    if "sensor_id" not in data or "value" not in data:
-        raise HTTPException(status_code=400, detail="Missing sensor_id or value")
-    
-    sensor_id = data["sensor_id"]
-    value = float(data["value"])
-    ts = datetime.fromisoformat(data["timestamp"]) if "timestamp" in data else datetime.now()
-    
-    # Insert reading
-    reading = SensorReading(sensor_id=sensor_id, value=value, timestamp=ts)
-    db.add(reading)
-    await db.commit()
-    
-    # Trigger background analysis
-    from backend.api.routes.analytics import run_background_analysis
-    background_tasks.add_task(run_background_analysis, sensor_id, AsyncSessionLocal)
-    
-    logger.info(f"Received data point for sensor {sensor_id}")
-    return {"status": "received", "sensor_id": sensor_id, "timestamp": ts.isoformat()}

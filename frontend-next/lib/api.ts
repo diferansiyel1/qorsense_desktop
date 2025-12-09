@@ -47,7 +47,7 @@ export const authApi = {
      */
     async login(credentials: LoginRequest): Promise<TokenResponse> {
         // Use JSON endpoint for email-based login
-        const response = await apiClient.post<TokenResponse>('/auth/login', {
+        const response = await apiClient.post<TokenResponse>('/api/auth/login', {
             email: credentials.email,
             password: credentials.password,
         });
@@ -62,7 +62,7 @@ export const authApi = {
      * Register a new user.
      */
     async register(data: RegisterRequest): Promise<User> {
-        const response = await apiClient.post<User>('/auth/register', data);
+        const response = await apiClient.post<User>('/api/auth/register', data);
         return response.data;
     },
 
@@ -70,7 +70,7 @@ export const authApi = {
      * Refresh access token.
      */
     async refreshToken(refreshToken: string): Promise<TokenResponse> {
-        const response = await apiClient.post<TokenResponse>('/auth/refresh', {
+        const response = await apiClient.post<TokenResponse>('/api/auth/refresh', {
             refresh_token: refreshToken,
         });
 
@@ -82,16 +82,24 @@ export const authApi = {
      * Get current user profile.
      */
     async getMe(): Promise<User> {
-        const response = await apiClient.get<User>('/auth/me');
+        const response = await apiClient.get<User>('/api/auth/me');
         return response.data;
     },
+
 
     /**
      * Update current user profile.
      */
     async updateProfile(data: UpdateProfileRequest): Promise<User> {
-        const response = await apiClient.put<User>('/auth/me', data);
+        const response = await apiClient.put<User>('/api/auth/me', data);
         return response.data;
+    },
+
+    /**
+     * Change password.
+     */
+    async changePassword(data: UpdateProfileRequest): Promise<void> {
+        await apiClient.post('/api/auth/change-password', data);
     },
 
     /**
@@ -147,6 +155,13 @@ export const sensorsApi = {
     },
 
     /**
+     * Delete a sensor by ID.
+     */
+    async delete(id: string): Promise<void> {
+        await apiClient.delete(`/sensors/${id}`);
+    },
+
+    /**
      * Create a new sensor.
      */
     async create(data: CreateSensorRequest): Promise<Sensor> {
@@ -166,27 +181,33 @@ export const sensorsApi = {
 
     /**
      * Upload CSV readings for a sensor.
-     * Uses native fetch for proper FormData handling.
+     * Uses axios for consistent error handling and token management.
      */
     async uploadCsv(sensorId: string, file: File): Promise<CSVImportResult> {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('sensor_id', sensorId);
 
-        const token = tokenStorage.getAccessToken();
-
-        const response = await fetch(`${API_BASE_URL}/sensors/upload-csv`, {
-            method: 'POST',
-            body: formData,
-            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        console.log('[uploadCsv] Starting upload via Axios:', {
+            sensorId,
+            fileName: file.name,
+            fileSize: file.size
         });
 
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
-            throw new Error(error.detail || `Upload failed with status ${response.status}`);
-        }
+        // Axios automatically sets the Content-Type to multipart/form-data
+        // and handles the Authorization header via interceptors
+        // We must explicitly unset Content-Type so the browser sets the boundary
+        const response = await apiClient.post<CSVImportResult>(
+            '/sensors/upload-csv',
+            formData,
+            {
+                headers: {
+                    'Content-Type': undefined
+                }
+            }
+        );
 
-        return response.json();
+        return response.data;
     },
 };
 

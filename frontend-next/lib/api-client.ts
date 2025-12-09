@@ -23,7 +23,7 @@ import type { ApiError, HttpError, TokenResponse } from '@/types/api';
 // ============================================================================
 
 /** API base URL from environment */
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
 /** Token storage keys */
 const TOKEN_KEYS = {
@@ -129,7 +129,7 @@ function createApiClient(): AxiosInstance {
                     try {
                         // Attempt token refresh
                         const response = await axios.post<TokenResponse>(
-                            `${API_BASE_URL}/auth/refresh`,
+                            `${API_BASE_URL}/api/auth/refresh`,
                             { refresh_token: refreshToken }
                         );
 
@@ -175,10 +175,10 @@ function transformError(error: AxiosError<ApiError>): HttpError {
 
     let message = 'An unexpected error occurred';
     let detail: string | undefined;
+    const data = error.response?.data;
 
-    if (error.response?.data) {
-        const data = error.response.data;
-        message = data.message || data.detail || message;
+    if (data) {
+        message = data.message || data.detail || message; // @ts-ignore - detail can be array or string
         detail = typeof data.detail === 'string' ? data.detail : undefined;
     } else if (error.message) {
         message = error.message;
@@ -200,12 +200,21 @@ function transformError(error: AxiosError<ApiError>): HttpError {
             break;
         case 422:
             message = 'Validation error';
+            if (Array.isArray(data?.detail)) {
+                // Extract first validation error
+                const firstError = data.detail[0];
+                if (firstError?.msg) {
+                    message = `Validation: ${firstError.msg} (${firstError.loc?.join('.')})`;
+                }
+            } else if (typeof data?.detail === 'string') {
+                message = data.detail;
+            }
             break;
         case 429:
             message = 'Too many requests';
             break;
         case 500:
-            message = 'Server error';
+            message = message === 'An unexpected error occurred' ? 'Server error' : message;
             break;
         case 502:
         case 503:

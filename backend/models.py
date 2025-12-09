@@ -33,8 +33,8 @@ class SensorResponse(BaseModel):
 
 class SensorDataInput(BaseModel):
     sensor_id: str
-    sensor_type: str
-    values: List[float]
+    sensor_type: str = "Generic"
+    values: List[float] = []
     timestamps: Optional[List[str]] = None
     config: Optional[SensorConfig] = SensorConfig()
 

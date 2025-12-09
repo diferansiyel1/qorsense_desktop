@@ -165,7 +165,7 @@ async def analyze_sensor(
     Returns:
         AnalysisResultExtended: Analysis result with metrics
     """
-    user_info = current_user.username if current_user else "anonymous (dev mode)"
+    user_info = current_user.email if current_user else "anonymous (dev mode)"
     logger.info(f"Analysis request for sensor: {data.sensor_id} by user: {user_info}")
     
     values = data.values
@@ -367,7 +367,7 @@ async def analyze_sensor_async(
         {"task_id": "abc-123", "status": "PENDING", "poll_url": "/tasks/abc-123"}
         ```
     """
-    user_info = current_user.username if current_user else "anonymous (dev mode)"
+    user_info = current_user.email if current_user else "anonymous (dev mode)"
     logger.info(f"Async analysis request for sensor: {request.sensor_id} by user: {user_info}")
     
     # Get values from request or fetch from database

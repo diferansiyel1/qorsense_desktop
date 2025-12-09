@@ -11,8 +11,21 @@ import {
     Database,
     FlaskConical,
     FileText,
-    Settings
+    Settings,
+    LogOut,
+    User as UserIcon,
+    MoreVertical
 } from "lucide-react";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useAuth } from "@/context/AuthContext";
 
 // Separator Component
 const Separator = ({ title }: { title?: string }) => (
@@ -80,6 +93,7 @@ const navGroups = [
 
 export function Sidebar() {
     const pathname = usePathname();
+    const { user, logout } = useAuth();
 
     return (
         <aside className="flex w-64 flex-col bg-[#111a22] p-4 text-white h-screen fixed left-0 top-0 border-r border-slate-gray/50 overflow-y-auto">
@@ -147,16 +161,48 @@ export function Sidebar() {
 
             {/* User Footer */}
             <div className="border-t border-slate-gray/50 pt-4 mt-4 bg-[#111a22]">
-                <div className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-slate-gray/50 transition-colors cursor-pointer">
-                    <div
-                        className="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-10 ring-2 ring-slate-gray"
-                        style={{ backgroundImage: 'url("https://lh3.googleusercontent.com/aida-public/AB6AXuAP2X7ema6KvBnOjwm6HMoL5ZtHOJm-G57mySRhKlNaF_-GDd_KVwbrPXdHnFb5ETJWUf5Sd_puLS4_eLpoySHMEtcB560CRazXtRlv8NyW2Z0c1JLBGyRw1XL2CfPIlK-Y3Q3kG2H5w5U9MP8h46udSvCmz2Gvftw9Dn2TeWknJ0p_6nuGf-SYqGP3LUuNFlOY_Rtowu9s01za2gmBcm_zXA-xDC4MldGgJlccQGvnO2qVhrnk0AiY3wrtSHuYf6QJ3ctBbVlLtwKO")' }}
-                    />
-                    <div className="flex flex-col">
-                        <h1 className="text-white text-sm font-semibold leading-normal">John Doe</h1>
-                        <p className="text-[#92adc9] text-xs font-medium leading-normal">System Admin</p>
-                    </div>
-                </div>
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <button className="flex items-center gap-3 px-2 py-2 w-full rounded-lg hover:bg-slate-gray/50 transition-colors cursor-pointer text-left outline-none group">
+                            <Avatar className="h-10 w-10 border-2 border-slate-gray transition-colors group-hover:border-[#00ADB5]">
+                                <AvatarImage src="" />
+                                <AvatarFallback className="bg-slate-gray text-white font-medium">
+                                    {user?.full_name ? user.full_name.charAt(0).toUpperCase() : 'U'}
+                                </AvatarFallback>
+                            </Avatar>
+                            <div className="flex flex-col flex-1 min-w-0">
+                                <h1 className="text-white text-sm font-semibold leading-normal truncate">
+                                    {user?.full_name || 'User'}
+                                </h1>
+                                <p className="text-[#92adc9] text-xs font-medium leading-normal truncate capitalize">
+                                    {user?.role?.replace('_', ' ') || 'Guest'}
+                                </p>
+                            </div>
+                            <MoreVertical className="h-4 w-4 text-gray-400 group-hover:text-white transition-colors" />
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-56" align="end" side="right" sideOffset={10}>
+                        <DropdownMenuLabel>My Account</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        <Link href="/profile">
+                            <DropdownMenuItem className="cursor-pointer">
+                                <UserIcon className="mr-2 h-4 w-4" />
+                                <span>Profile</span>
+                            </DropdownMenuItem>
+                        </Link>
+                        <Link href="/settings">
+                            <DropdownMenuItem className="cursor-pointer">
+                                <Settings className="mr-2 h-4 w-4" />
+                                <span>Settings</span>
+                            </DropdownMenuItem>
+                        </Link>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem className="cursor-pointer text-red-500 hover:text-red-500 focus:text-red-500" onClick={logout}>
+                            <LogOut className="mr-2 h-4 w-4" />
+                            <span>Log out</span>
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
             </div>
         </aside>
     );
