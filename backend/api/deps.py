@@ -1,30 +1,128 @@
 """
-API Dependencies Module.
+API Dependencies Module - Multi-Tenant Support.
 
 Provides reusable dependencies for FastAPI endpoints including:
-- Authentication (get_current_user)
+- Authentication (get_current_user with JWT claims)
+- Role-based authorization
+- Organization-scoped data access
 - Database sessions
 - Pagination
-- Rate limiting
+
+JWT tokens contain:
+- sub: user_id (UUID)
+- org_id: organization_id (UUID)
+- role: user role (super_admin, org_admin, engineer)
+
+This allows authorization checks without additional DB queries.
 """
 
 from typing import Annotated, Optional
-from fastapi import Depends, HTTPException, status
+from dataclasses import dataclass
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
-from jose import JWTError
+from sqlalchemy import select
 
 from backend.database import get_db
 from backend.core.config import settings
 from backend.core.security import verify_token
-from backend.models_db import User
+from backend.models_db import User, Role
 
 
 # OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="/api/auth/login",
+    tokenUrl="/api/auth/login/form",
     auto_error=False  # Don't auto-error, we'll handle it
 )
+
+
+@dataclass
+class TokenClaims:
+    """
+    Parsed JWT token claims.
+    
+    Provides quick access to authorization info without DB lookup.
+    """
+    user_id: str
+    org_id: Optional[str]
+    role: Role
+    
+    @property
+    def is_super_admin(self) -> bool:
+        """Check if user has SUPER_ADMIN role."""
+        return self.role == Role.SUPER_ADMIN
+    
+    @property
+    def is_org_admin(self) -> bool:
+        """Check if user has ORG_ADMIN role."""
+        return self.role == Role.ORG_ADMIN
+    
+    @property
+    def is_engineer(self) -> bool:
+        """Check if user has ENGINEER role."""
+        return self.role == Role.ENGINEER
+    
+    def can_access_org(self, org_id: str) -> bool:
+        """
+        Check if user can access the specified organization.
+        
+        SUPER_ADMIN can access all organizations.
+        Others can only access their own organization.
+        """
+        if self.is_super_admin:
+            return True
+        return self.org_id == org_id
+
+
+def parse_token_claims(payload: dict) -> Optional[TokenClaims]:
+    """
+    Parse JWT payload into TokenClaims object.
+    
+    Returns None if payload is invalid.
+    """
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+    
+    role_str = payload.get("role", "engineer")
+    try:
+        role = Role(role_str)
+    except ValueError:
+        role = Role.ENGINEER  # Default fallback
+    
+    return TokenClaims(
+        user_id=user_id,
+        org_id=payload.get("org_id"),
+        role=role,
+    )
+
+
+async def get_token_claims(
+    token: Annotated[Optional[str], Depends(oauth2_scheme)],
+) -> TokenClaims:
+    """
+    Get token claims from JWT without DB lookup.
+    
+    Use this for lightweight authorization checks.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Kimlik doğrulama başarısız",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    if token is None:
+        raise credentials_exception
+    
+    payload = verify_token(token, token_type="access")
+    if payload is None:
+        raise credentials_exception
+    
+    claims = parse_token_claims(payload)
+    if claims is None:
+        raise credentials_exception
+    
+    return claims
 
 
 async def get_current_user(
@@ -34,39 +132,29 @@ async def get_current_user(
     """
     Get the current authenticated user from JWT token.
     
-    Args:
-        token: JWT access token from Authorization header
-        db: Database session
-        
-    Returns:
-        Authenticated User object
-        
-    Raises:
-        HTTPException: If token is invalid or user not found
+    Performs DB lookup to get full user object.
+    Use get_token_claims if you only need authorization info.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
+        detail="Kimlik doğrulama başarısız",
         headers={"WWW-Authenticate": "Bearer"},
     )
     
     if token is None:
         raise credentials_exception
     
-    # Verify and decode the token
     payload = verify_token(token, token_type="access")
     if payload is None:
         raise credentials_exception
     
-    # Extract user identifier from token
-    username: Optional[str] = payload.get("sub")
-    if username is None:
+    user_id: Optional[str] = payload.get("sub")
+    if user_id is None:
         raise credentials_exception
     
-    # Fetch user from database
-    from sqlalchemy import select
+    # Fetch user from database by ID (UUID)
     result = await db.execute(
-        select(User).where(User.username == username)
+        select(User).where(User.id == user_id)
     )
     user = result.scalar_one_or_none()
     
@@ -76,7 +164,7 @@ async def get_current_user(
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is disabled"
+            detail="Hesabınız devre dışı bırakılmış"
         )
     
     return user
@@ -87,43 +175,39 @@ async def get_current_active_user(
 ) -> User:
     """
     Get current user and verify they are active.
-    
-    Args:
-        current_user: User from get_current_user dependency
-        
-    Returns:
-        Active User object
-        
-    Raises:
-        HTTPException: If user is inactive
     """
     if not current_user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is disabled"
+            detail="Hesabınız devre dışı bırakılmış"
         )
     return current_user
 
 
-async def get_current_admin_user(
+async def get_current_org_admin(
     current_user: Annotated[User, Depends(get_current_user)]
 ) -> User:
     """
-    Get current user and verify they have admin privileges.
-    
-    Args:
-        current_user: User from get_current_user dependency
-        
-    Returns:
-        Admin User object
-        
-    Raises:
-        HTTPException: If user is not an admin
+    Get current user and verify they have ORG_ADMIN or SUPER_ADMIN role.
     """
-    if not current_user.is_admin:
+    if current_user.role not in [Role.ORG_ADMIN, Role.SUPER_ADMIN]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required"
+            detail="Bu işlem için ORG_ADMIN veya SUPER_ADMIN yetkisi gerekli"
+        )
+    return current_user
+
+
+async def get_current_super_admin(
+    current_user: Annotated[User, Depends(get_current_user)]
+) -> User:
+    """
+    Get current user and verify they have SUPER_ADMIN role.
+    """
+    if current_user.role != Role.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu işlem için SUPER_ADMIN yetkisi gerekli"
         )
     return current_user
 
@@ -136,15 +220,7 @@ async def get_optional_user(
     Optionally get the current user if authenticated.
     
     Does not raise an exception if no valid token is provided.
-    Useful for endpoints that have different behavior for 
-    authenticated vs unauthenticated users.
-    
-    Args:
-        token: Optional JWT access token
-        db: Database session
-        
-    Returns:
-        User object if authenticated, None otherwise
+    Useful for endpoints with different behavior for auth/unauth users.
     """
     if token is None:
         return None
@@ -153,13 +229,12 @@ async def get_optional_user(
     if payload is None:
         return None
     
-    username: Optional[str] = payload.get("sub")
-    if username is None:
+    user_id: Optional[str] = payload.get("sub")
+    if user_id is None:
         return None
     
-    from sqlalchemy import select
     result = await db.execute(
-        select(User).where(User.username == username)
+        select(User).where(User.id == user_id)
     )
     user = result.scalar_one_or_none()
     
@@ -182,19 +257,16 @@ async def get_current_user_or_dev_bypass(
     
     In production mode:
     - Always requires valid token, raises 401 if missing/invalid
-    
-    This allows frontend development without requiring login,
-    while enforcing auth in production.
     """
     # Development mode bypass
     if settings.is_development and token is None:
-        return None  # Allow unauthenticated access in dev
+        return None
     
     # Production mode: require auth
     if not settings.is_development and token is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
+            detail="Kimlik doğrulama gerekli",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
@@ -203,38 +275,70 @@ async def get_current_user_or_dev_bypass(
         payload = verify_token(token, token_type="access")
         if payload is None:
             if settings.is_development:
-                return None  # Invalid token in dev = treat as no auth
+                return None
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token",
+                detail="Geçersiz veya süresi dolmuş token",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        username: Optional[str] = payload.get("sub")
-        if username:
-            from sqlalchemy import select
+        user_id: Optional[str] = payload.get("sub")
+        if user_id:
             result = await db.execute(
-                select(User).where(User.username == username)
+                select(User).where(User.id == user_id)
             )
             user = result.scalar_one_or_none()
             if user and user.is_active:
                 return user
     
-    # In development, return None for unauthenticated access
     if settings.is_development:
         return None
     
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
+        detail="Kimlik doğrulama başarısız",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
 
-# Type aliases for cleaner dependency injection
+def require_org_access(org_id: str):
+    """
+    Factory function to create an organization access checker dependency.
+    
+    Usage:
+        @router.get("/orgs/{org_id}/data")
+        async def get_org_data(
+            org_id: str,
+            _: Annotated[None, Depends(require_org_access(org_id))]
+        ):
+            ...
+    """
+    async def checker(claims: Annotated[TokenClaims, Depends(get_token_claims)]):
+        if not claims.can_access_org(org_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Bu organizasyona erişim yetkiniz yok"
+            )
+    return checker
+
+
+# ==============================================================================
+# TYPE ALIASES FOR CLEANER DEPENDENCY INJECTION
+# ==============================================================================
+
+# Database session
+DbSession = Annotated[AsyncSession, Depends(get_db)]
+
+# User dependencies
 CurrentUser = Annotated[User, Depends(get_current_user)]
 CurrentActiveUser = Annotated[User, Depends(get_current_active_user)]
-CurrentAdminUser = Annotated[User, Depends(get_current_admin_user)]
+CurrentOrgAdmin = Annotated[User, Depends(get_current_org_admin)]
+CurrentSuperAdmin = Annotated[User, Depends(get_current_super_admin)]
 OptionalUser = Annotated[Optional[User], Depends(get_optional_user)]
 DevUser = Annotated[Optional[User], Depends(get_current_user_or_dev_bypass)]
-DbSession = Annotated[AsyncSession, Depends(get_db)]
+
+# Token claims (lightweight, no DB lookup)
+Claims = Annotated[TokenClaims, Depends(get_token_claims)]
+
+# Legacy alias for backward compatibility
+CurrentAdminUser = CurrentOrgAdmin

@@ -18,7 +18,7 @@ export type SourceType = 'CSV' | 'SCADA' | 'IoT' | 'API' | 'MANUAL';
 export type SensorStatus = 'Normal' | 'Warning' | 'Critical' | 'Unknown' | 'No Data';
 
 /** User role enumeration */
-export type UserRole = 'VIEWER' | 'OPERATOR' | 'ENGINEER' | 'ADMIN';
+export type UserRole = 'super_admin' | 'org_admin' | 'engineer';
 
 /** Celery task status */
 export type TaskStatus =
@@ -36,7 +36,7 @@ export type TaskStatus =
 
 /** Login request payload */
 export interface LoginRequest {
-    username: string;
+    email: string;
     password: string;
 }
 
@@ -45,6 +45,7 @@ export interface TokenResponse {
     access_token: string;
     refresh_token: string;
     token_type: 'bearer';
+    expires_in: number;
 }
 
 /** Refresh token request */
@@ -62,14 +63,12 @@ export interface RegisterRequest {
 
 /** Current user profile */
 export interface User {
-    id: number;
-    username: string;
+    id: string;
     email: string;
     full_name: string | null;
     role: UserRole;
     is_active: boolean;
-    is_admin: boolean;
-    org_id: number | null;
+    organization_id: string | null;
     created_at: string;
     last_login: string | null;
 }
@@ -92,7 +91,7 @@ export interface Sensor {
     name: string;
     location: string;
     source_type: SourceType;
-    organization_id: number | null;
+    organization_id: string | null;
     latest_health_score: number;
     latest_status: SensorStatus;
     latest_analysis_timestamp: string | null;
@@ -103,7 +102,7 @@ export interface CreateSensorRequest {
     name: string;
     location: string;
     source_type: SourceType;
-    organization_id?: number;
+    organization_id?: string;
     config?: Record<string, unknown>;
 }
 

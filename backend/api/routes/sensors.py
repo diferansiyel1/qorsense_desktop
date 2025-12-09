@@ -60,7 +60,7 @@ async def get_sensors(
             name=s.name,
             location=s.location,
             source_type=s.source_type,
-            organization_id=s.org_id,
+            organization_id=s.organization_id,
             latest_health_score=latest_analysis.health_score if latest_analysis else 100.0,
             latest_status=latest_analysis.status if latest_analysis else "Normal",
             latest_analysis_timestamp=latest_analysis.timestamp if latest_analysis else None
@@ -94,7 +94,7 @@ async def create_sensor(
         name=sensor.name,
         location=sensor.location,
         source_type=SourceType(sensor.source_type),
-        org_id=sensor.organization_id
+        organization_id=sensor.organization_id
     )
     db.add(db_sensor)
     await db.commit()
@@ -106,7 +106,7 @@ async def create_sensor(
         name=db_sensor.name,
         location=db_sensor.location,
         source_type=db_sensor.source_type,
-        organization_id=db_sensor.org_id,
+        organization_id=db_sensor.organization_id,
         latest_health_score=100.0,
         latest_status="Normal",
         latest_analysis_timestamp=None

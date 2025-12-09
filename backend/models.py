@@ -16,14 +16,14 @@ class SensorCreate(BaseModel):
     name: str
     location: str
     source_type: str = "CSV"
-    organization_id: Optional[int] = None
+    organization_id: Optional[str] = None
 
 class SensorResponse(BaseModel):
     id: str
     name: str
     location: str
     source_type: str
-    organization_id: Optional[int] = None
+    organization_id: Optional[str] = None
     latest_health_score: Optional[float] = 100.0
     latest_status: Optional[str] = "Normal"
     latest_analysis_timestamp: Optional[datetime] = None

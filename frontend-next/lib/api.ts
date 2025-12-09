@@ -42,17 +42,14 @@ import type {
 
 export const authApi = {
     /**
-     * Login with username and password.
+     * Login with email and password.
      * Stores tokens automatically on success.
      */
     async login(credentials: LoginRequest): Promise<TokenResponse> {
-        // OAuth2 expects form data, not JSON
-        const formData = new URLSearchParams();
-        formData.append('username', credentials.username);
-        formData.append('password', credentials.password);
-
-        const response = await apiClient.post<TokenResponse>('/auth/login', formData, {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        // Use JSON endpoint for email-based login
+        const response = await apiClient.post<TokenResponse>('/auth/login', {
+            email: credentials.email,
+            password: credentials.password,
         });
 
         // Store tokens
