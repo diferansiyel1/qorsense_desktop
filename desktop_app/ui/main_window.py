@@ -3,7 +3,10 @@ import os
 import logging
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QLabel, QFrame, QMessageBox, QProgressBar,
-                             QFileDialog, QInputDialog)
+                             QFileDialog, QInputDialog, QDialog, QDialogButtonBox,
+                             QRadioButton, QButtonGroup, QFormLayout, QLineEdit,
+                             QSpinBox, QDoubleSpinBox, QGroupBox, QStackedWidget,
+                             QComboBox)
 import numpy as np
 from PyQt6.QtCore import Qt, QTimer
 from datetime import datetime
@@ -16,9 +19,240 @@ from desktop_app.ui.results_panel import ResultsPanel
 from desktop_app.core.analyzer_bridge import AnalyzerBridge
 from desktop_app.workers.analysis_worker import AnalysisWorker
 from desktop_app.workers.file_loader import FileLoadWorker
+from desktop_app.workers.live_worker import ModbusWorker
+# Import list_available_ports for COM port scanning
+from desktop_app.workers.live_worker import list_available_ports
 from backend.models import SensorConfig
 
 logger = logging.getLogger("MainWindow")
+
+
+class ConnectionDialog(QDialog):
+    """
+    Dialog for configuring data source connection.
+    Supports: CSV file, Modbus TCP (Ethernet), Modbus RTU (RS485/USB Serial).
+    
+    Hamilton VisiWater/Arc sensor defaults:
+    - Baud: 19200
+    - Parity: Even
+    - StopBits: 1
+    - Bytesize: 8
+    """
+    
+    SOURCE_CSV = "csv"
+    SOURCE_TCP = "tcp"
+    SOURCE_RTU = "rtu"
+    
+    # Hamilton sensor defaults
+    HAMILTON_BAUD = 19200
+    HAMILTON_PARITY = "E"  # Even
+    HAMILTON_STOPBITS = 1
+    HAMILTON_BYTESIZE = 8
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Connection Settings")
+        self.setMinimumWidth(480)
+        
+        layout = QVBoxLayout(self)
+        
+        # --- Source Type Selection ---
+        source_group = QGroupBox("Data Source")
+        source_layout = QVBoxLayout(source_group)
+        
+        self.radio_csv = QRadioButton("CSV File")
+        self.radio_tcp = QRadioButton("Modbus TCP (Ethernet)")
+        self.radio_rtu = QRadioButton("Modbus RTU (RS485/USB)")
+        self.radio_csv.setChecked(True)
+        
+        self.source_button_group = QButtonGroup(self)
+        self.source_button_group.addButton(self.radio_csv, 0)
+        self.source_button_group.addButton(self.radio_tcp, 1)
+        self.source_button_group.addButton(self.radio_rtu, 2)
+        
+        source_layout.addWidget(self.radio_csv)
+        source_layout.addWidget(self.radio_tcp)
+        source_layout.addWidget(self.radio_rtu)
+        layout.addWidget(source_group)
+        
+        # --- Stacked Widget for Settings ---
+        self.settings_stack = QStackedWidget()
+        
+        # Page 0: Empty (CSV mode)
+        empty_page = QWidget()
+        empty_layout = QVBoxLayout(empty_page)
+        empty_layout.addWidget(QLabel("Click OK to select a CSV file."))
+        self.settings_stack.addWidget(empty_page)
+        
+        # Page 1: Modbus TCP Settings
+        tcp_page = QWidget()
+        tcp_layout = QFormLayout(tcp_page)
+        
+        self.ip_input = QLineEdit("192.168.1.100")
+        self.ip_input.setPlaceholderText("e.g., 192.168.1.100")
+        tcp_layout.addRow("IP Address:", self.ip_input)
+        
+        self.tcp_port_input = QSpinBox()
+        self.tcp_port_input.setRange(1, 65535)
+        self.tcp_port_input.setValue(502)
+        tcp_layout.addRow("Port:", self.tcp_port_input)
+        
+        self.tcp_register_input = QSpinBox()
+        self.tcp_register_input.setRange(0, 65535)
+        self.tcp_register_input.setValue(0)
+        tcp_layout.addRow("Register Address:", self.tcp_register_input)
+        
+        self.tcp_slave_input = QSpinBox()
+        self.tcp_slave_input.setRange(1, 247)
+        self.tcp_slave_input.setValue(1)
+        tcp_layout.addRow("Slave ID:", self.tcp_slave_input)
+        
+        self.tcp_scale_input = QDoubleSpinBox()
+        self.tcp_scale_input.setRange(0.0001, 10000.0)
+        self.tcp_scale_input.setValue(1.0)
+        self.tcp_scale_input.setDecimals(4)
+        tcp_layout.addRow("Scale Factor:", self.tcp_scale_input)
+        
+        self.settings_stack.addWidget(tcp_page)
+        
+        # Page 2: Modbus RTU Settings
+        rtu_page = QWidget()
+        rtu_layout = QFormLayout(rtu_page)
+        
+        # COM Port ComboBox (populated dynamically)
+        self.com_port_combo = QComboBox()
+        self._refresh_com_ports()
+        
+        # Refresh button for COM ports
+        com_port_row = QHBoxLayout()
+        com_port_row.addWidget(self.com_port_combo, 1)
+        btn_refresh = QPushButton("↻")
+        btn_refresh.setFixedWidth(30)
+        btn_refresh.setToolTip("Refresh COM ports")
+        btn_refresh.clicked.connect(self._refresh_com_ports)
+        com_port_row.addWidget(btn_refresh)
+        
+        rtu_layout.addRow("COM Port:", com_port_row)
+        
+        # Baud Rate ComboBox
+        self.baud_combo = QComboBox()
+        self.baud_combo.addItems(["9600", "19200", "38400", "57600", "115200"])
+        self.baud_combo.setCurrentText(str(self.HAMILTON_BAUD))  # Hamilton default
+        rtu_layout.addRow("Baud Rate:", self.baud_combo)
+        
+        # Parity ComboBox
+        self.parity_combo = QComboBox()
+        self.parity_combo.addItems(["None (N)", "Even (E)", "Odd (O)"])
+        self.parity_combo.setCurrentIndex(1)  # Even - Hamilton default
+        rtu_layout.addRow("Parity:", self.parity_combo)
+        
+        # Stop Bits
+        self.stopbits_combo = QComboBox()
+        self.stopbits_combo.addItems(["1", "2"])
+        self.stopbits_combo.setCurrentText("1")  # Hamilton default
+        rtu_layout.addRow("Stop Bits:", self.stopbits_combo)
+        
+        # Register Address
+        self.rtu_register_input = QSpinBox()
+        self.rtu_register_input.setRange(0, 65535)
+        self.rtu_register_input.setValue(0)
+        rtu_layout.addRow("Register Address:", self.rtu_register_input)
+        
+        # Slave ID
+        self.rtu_slave_input = QSpinBox()
+        self.rtu_slave_input.setRange(1, 247)
+        self.rtu_slave_input.setValue(1)
+        rtu_layout.addRow("Slave ID:", self.rtu_slave_input)
+        
+        # Scale Factor
+        self.rtu_scale_input = QDoubleSpinBox()
+        self.rtu_scale_input.setRange(0.0001, 10000.0)
+        self.rtu_scale_input.setValue(1.0)
+        self.rtu_scale_input.setDecimals(4)
+        rtu_layout.addRow("Scale Factor:", self.rtu_scale_input)
+        
+        # Hamilton note
+        hamilton_note = QLabel("💡 Hamilton VisiWater/Arc: 19200, Even, 1 stop bit")
+        hamilton_note.setStyleSheet("color: #888; font-style: italic; font-size: 11px;")
+        rtu_layout.addRow("", hamilton_note)
+        
+        self.settings_stack.addWidget(rtu_page)
+        
+        layout.addWidget(self.settings_stack)
+        
+        # --- Dialog Buttons ---
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        # Connect radio buttons to switch stacked widget page
+        self.radio_csv.toggled.connect(lambda: self.settings_stack.setCurrentIndex(0))
+        self.radio_tcp.toggled.connect(lambda: self.settings_stack.setCurrentIndex(1))
+        self.radio_rtu.toggled.connect(lambda: self.settings_stack.setCurrentIndex(2))
+    
+    def _refresh_com_ports(self):
+        """Refresh the COM port list from system."""
+        self.com_port_combo.clear()
+        ports = list_available_ports()
+        if ports:
+            for port_name, description in ports:
+                display = f"{port_name} - {description}" if description else port_name
+                self.com_port_combo.addItem(display, port_name)
+        else:
+            self.com_port_combo.addItem("No ports found", "")
+    
+    def get_source_type(self) -> str:
+        """Return selected source type."""
+        if self.radio_tcp.isChecked():
+            return self.SOURCE_TCP
+        elif self.radio_rtu.isChecked():
+            return self.SOURCE_RTU
+        return self.SOURCE_CSV
+    
+    def get_tcp_config(self) -> dict:
+        """Return Modbus TCP configuration."""
+        return {
+            "connection_type": "TCP",
+            "ip_address": self.ip_input.text().strip(),
+            "tcp_port": self.tcp_port_input.value(),
+            "register_address": self.tcp_register_input.value(),
+            "slave_id": self.tcp_slave_input.value(),
+            "scale_factor": self.tcp_scale_input.value()
+        }
+    
+    def get_rtu_config(self) -> dict:
+        """Return Modbus RTU configuration."""
+        # Extract parity letter from combo text
+        parity_text = self.parity_combo.currentText()
+        parity = "N"
+        if "Even" in parity_text:
+            parity = "E"
+        elif "Odd" in parity_text:
+            parity = "O"
+        
+        return {
+            "connection_type": "RTU",
+            "serial_port": self.com_port_combo.currentData() or self.com_port_combo.currentText().split(" - ")[0],
+            "baudrate": int(self.baud_combo.currentText()),
+            "parity": parity,
+            "stopbits": int(self.stopbits_combo.currentText()),
+            "bytesize": 8,  # Fixed at 8 for Modbus RTU
+            "register_address": self.rtu_register_input.value(),
+            "slave_id": self.rtu_slave_input.value(),
+            "scale_factor": self.rtu_scale_input.value()
+        }
+    
+    def get_modbus_config(self) -> dict:
+        """Return Modbus configuration based on selected type."""
+        if self.radio_tcp.isChecked():
+            return self.get_tcp_config()
+        elif self.radio_rtu.isChecked():
+            return self.get_rtu_config()
+        return {}
+
 
 class QorSenseMainWindow(QMainWindow):
     def __init__(self):
@@ -46,6 +280,13 @@ class QorSenseMainWindow(QMainWindow):
         self.loader_worker = None # For file loading
         self.analysis_worker = None # For analysis tasks
         self.analysis_thread = None # To run analysis_worker in a separate thread
+        self.modbus_worker = None  # For Modbus TCP live data
+        
+        # Live Data Management
+        self.live_data_buffer = []  # Buffer for live Modbus data
+        self.live_sample_count = 0  # Counter for triggering analysis
+        self.ANALYSIS_TRIGGER_COUNT = 60  # Trigger analysis every 60 samples (1 minute at 1Hz)
+        self.is_live_mode = False  # Flag for live monitoring mode
         
         # --- UI SETUP ---
         self.setup_ui()
@@ -102,6 +343,40 @@ class QorSenseMainWindow(QMainWindow):
         layout = QHBoxLayout(panel)
         layout.setContentsMargins(10, 5, 10, 5)
         
+        # Connection Settings Button
+        self.btn_connect = QPushButton("⚙ Connection")
+        self.btn_connect.setMinimumHeight(40)
+        self.btn_connect.setStyleSheet("""
+            QPushButton { 
+                background-color: #4a4a4a; 
+                color: white; 
+                font-weight: bold; 
+                border-radius: 4px;
+                padding: 0 15px;
+            }
+            QPushButton:hover { background-color: #5a5a5a; }
+            QPushButton:pressed { background-color: #3a3a3a; }
+        """)
+        self.btn_connect.clicked.connect(self.show_connection_dialog)
+        
+        # Stop Live Button (initially hidden)
+        self.btn_stop_live = QPushButton("⏹ Stop Live")
+        self.btn_stop_live.setMinimumHeight(40)
+        self.btn_stop_live.setStyleSheet("""
+            QPushButton { 
+                background-color: #cc3333; 
+                color: white; 
+                font-weight: bold; 
+                border-radius: 4px;
+                padding: 0 15px;
+            }
+            QPushButton:hover { background-color: #dd4444; }
+            QPushButton:pressed { background-color: #bb2222; }
+        """)
+        self.btn_stop_live.clicked.connect(self.stop_live_monitoring)
+        self.btn_stop_live.setVisible(False)
+        
+        # Analyze Button
         self.btn_analyze = QPushButton("ANALYZE SIGNAL")
         self.btn_analyze.setMinimumHeight(40)
         self.btn_analyze.setStyleSheet("""
@@ -118,11 +393,19 @@ class QorSenseMainWindow(QMainWindow):
         self.btn_analyze.clicked.connect(self.run_analysis_on_current_data)
         self.btn_analyze.setEnabled(False) # Disabled until data is loaded
         
+        # Live Status Indicator
+        self.lbl_live_status = QLabel("")
+        self.lbl_live_status.setStyleSheet("color: #ff6600; font-weight: bold;")
+        self.lbl_live_status.setVisible(False)
+        
         self.lbl_system_status = QLabel("SYSTEM: ONLINE")
         self.lbl_system_status.setStyleSheet("color: #32c850; font-weight: bold;")
         
+        layout.addWidget(self.btn_connect)
+        layout.addWidget(self.btn_stop_live)
         layout.addWidget(self.btn_analyze)
         layout.addStretch()
+        layout.addWidget(self.lbl_live_status)
         layout.addWidget(self.lbl_system_status)
         return panel
 
@@ -393,3 +676,190 @@ class QorSenseMainWindow(QMainWindow):
             self.worker.wait()
             self.worker = None
 
+    # --- CONNECTION DIALOG ---
+    
+    def show_connection_dialog(self):
+        """Show the connection settings dialog."""
+        dialog = ConnectionDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            source_type = dialog.get_source_type()
+            
+            if source_type == ConnectionDialog.SOURCE_CSV:
+                # Use existing file dialog
+                self.load_data_dialog()
+            elif source_type in (ConnectionDialog.SOURCE_TCP, ConnectionDialog.SOURCE_RTU):
+                # Start Modbus live monitoring (TCP or RTU)
+                config = dialog.get_modbus_config()
+                self.start_live_monitoring(config)
+
+    # --- LIVE MONITORING (Modbus TCP/RTU) ---
+    
+    def start_live_monitoring(self, config: dict):
+        """
+        Start live Modbus monitoring with UI integration.
+        Supports both TCP and RTU connection types.
+        
+        Args:
+            config: Dict with connection_type and relevant parameters
+        """
+        if self.modbus_worker and self.modbus_worker.isRunning():
+            QMessageBox.warning(self, "Warning", "Live monitoring already running. Stop it first.")
+            return
+        
+        connection_type = config.get("connection_type", "TCP")
+        
+        # Build connection string for logging
+        if connection_type == "TCP":
+            conn_str = f"{config.get('ip_address')}:{config.get('tcp_port', 502)}"
+        else:
+            conn_str = f"{config.get('serial_port')} @ {config.get('baudrate')}bps"
+        
+        logger.info(f"Starting {connection_type} monitoring: {conn_str}")
+        
+        # Reset live data state
+        self.live_data_buffer = []
+        self.live_sample_count = 0
+        self.is_live_mode = True
+        
+        # Clear oscilloscope buffer
+        self.dashboard.oscilloscope.clear_realtime_buffer()
+        
+        # Create worker based on connection type
+        if connection_type == "TCP":
+            self.modbus_worker = ModbusWorker(
+                connection_type="TCP",
+                ip_address=config.get("ip_address", "192.168.1.100"),
+                tcp_port=config.get("tcp_port", 502),
+                register_address=config.get("register_address", 0),
+                slave_id=config.get("slave_id", 1),
+                scale_factor=config.get("scale_factor", 1.0),
+                read_interval=1.0
+            )
+        else:  # RTU
+            self.modbus_worker = ModbusWorker(
+                connection_type="RTU",
+                serial_port=config.get("serial_port", "COM1"),
+                baudrate=config.get("baudrate", 19200),
+                parity=config.get("parity", "E"),
+                stopbits=config.get("stopbits", 1),
+                bytesize=config.get("bytesize", 8),
+                register_address=config.get("register_address", 0),
+                slave_id=config.get("slave_id", 1),
+                scale_factor=config.get("scale_factor", 1.0),
+                read_interval=1.0
+            )
+        
+        # Connect signals
+        self.modbus_worker.data_received.connect(self._on_modbus_data_received)
+        self.modbus_worker.error_occurred.connect(self._on_modbus_error)
+        self.modbus_worker.connection_status.connect(self._on_modbus_connection_status)
+        
+        # Start worker
+        self.modbus_worker.start()
+        
+        # Update UI
+        self.btn_stop_live.setVisible(True)
+        self.btn_connect.setEnabled(False)
+        self.lbl_live_status.setText(f"● LIVE ({connection_type})")
+        self.lbl_live_status.setVisible(True)
+        self.status_label.setText(f"Connecting to {conn_str}...")
+        
+        self.panel_alarms.add_alarm(
+            datetime.now().strftime("%H:%M:%S"), 
+            "INFO", 
+            "ModbusWorker", 
+            f"Started {connection_type} monitoring: {conn_str}"
+        )
+    
+    def stop_live_monitoring(self):
+        """Stop the Modbus worker and reset UI."""
+        if self.modbus_worker:
+            logger.info("Stopping Modbus worker...")
+            self.modbus_worker.stop()
+            self.modbus_worker = None
+        
+        # Reset state
+        self.is_live_mode = False
+        
+        # Update UI
+        self.btn_stop_live.setVisible(False)
+        self.btn_connect.setEnabled(True)
+        self.lbl_live_status.setVisible(False)
+        self.status_label.setText("Live monitoring stopped")
+        
+        self.panel_alarms.add_alarm(
+            datetime.now().strftime("%H:%M:%S"),
+            "INFO",
+            "ModbusWorker",
+            "Live monitoring stopped"
+        )
+    
+    def _on_modbus_data_received(self, value: float, timestamp: float):
+        """Handle incoming Modbus data - update oscilloscope and buffer for analysis."""
+        # Update oscilloscope in real-time (scrolling display)
+        self.dashboard.oscilloscope.update_realtime(value, timestamp)
+        
+        # Add to analysis buffer
+        self.live_data_buffer.append(value)
+        self.live_sample_count += 1
+        
+        # Update status with sample count
+        self.status_label.setText(f"LIVE: {len(self.live_data_buffer)} samples | Last: {value:.2f}")
+        
+        # Trigger analysis every ANALYSIS_TRIGGER_COUNT samples (60 = 1 minute at 1Hz)
+        if self.live_sample_count >= self.ANALYSIS_TRIGGER_COUNT:
+            self.live_sample_count = 0  # Reset counter
+            self._trigger_live_analysis()
+    
+    def _trigger_live_analysis(self):
+        """Trigger analysis on buffered live data."""
+        if len(self.live_data_buffer) < 50:  # Minimum data points required
+            logger.warning(f"Not enough data for analysis: {len(self.live_data_buffer)} points")
+            return
+        
+        logger.info(f"Triggering live analysis on {len(self.live_data_buffer)} points")
+        
+        # Use last 300 points (5 minutes) or all available
+        analysis_data = self.live_data_buffer[-300:] if len(self.live_data_buffer) > 300 else list(self.live_data_buffer)
+        
+        # Set as current data for analysis
+        self.current_data = analysis_data
+        
+        # Run analysis (will update UI when complete)
+        self.run_analysis_on_current_data()
+        
+        self.panel_alarms.add_alarm(
+            datetime.now().strftime("%H:%M:%S"),
+            "INFO",
+            "LiveAnalysis",
+            f"Auto-analysis triggered ({len(analysis_data)} points)"
+        )
+    
+    def _on_modbus_error(self, error_msg: str):
+        """Handle Modbus errors."""
+        logger.error(f"[MODBUS ERROR] {error_msg}")
+        self.panel_alarms.add_alarm(
+            datetime.now().strftime("%H:%M:%S"),
+            "WARNING",
+            "ModbusWorker",
+            error_msg
+        )
+    
+    def _on_modbus_connection_status(self, connected: bool):
+        """Handle Modbus connection status changes."""
+        status = "CONNECTED" if connected else "DISCONNECTED"
+        logger.info(f"[MODBUS STATUS] {status}")
+        
+        if connected:
+            self.lbl_system_status.setText("SYSTEM: LIVE")
+            self.lbl_system_status.setStyleSheet("color: #ff6600; font-weight: bold;")
+        else:
+            self.lbl_system_status.setText("SYSTEM: OFFLINE")
+            self.lbl_system_status.setStyleSheet("color: #cc3333; font-weight: bold;")
+        
+        self.panel_alarms.add_alarm(
+            datetime.now().strftime("%H:%M:%S"),
+            "INFO" if connected else "WARNING",
+            "ModbusWorker",
+            f"Connection: {status}"
+        )

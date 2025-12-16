@@ -41,5 +41,33 @@
         ]
       }
     ]
+  },
+  {
+    "name": "Bioferm",
+    "children": [
+      {
+        "name": "Tank2",
+        "children": [
+          {
+            "name": "pH03",
+            "sensor_type": "pH Sens\u00f6r\u00fc",
+            "unit": "pH",
+            "category": "Proses Analitik"
+          },
+          {
+            "name": "Viscozite",
+            "sensor_type": "pH Sens\u00f6r\u00fc",
+            "unit": "mV",
+            "category": "Proses Analitik"
+          },
+          {
+            "name": "Visco03",
+            "sensor_type": "Viscozite",
+            "unit": "cP",
+            "category": "\u00d6zel (Custom)"
+          }
+        ]
+      }
+    ]
   }
 ]

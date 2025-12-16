@@ -3,7 +3,7 @@ from PyQt6.QtCore import Qt
 import pyqtgraph as pg
 
 class OscilloscopeWidget(pg.PlotWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, max_points: int = 300):
         super().__init__(parent=parent, title="Raw Sensor Signal (Oscilloscope Mode)")
         self.setBackground('#1e1e1e')
         self.showGrid(x=True, y=True, alpha=0.3)
@@ -11,11 +11,59 @@ class OscilloscopeWidget(pg.PlotWidget):
         self.setLabel('bottom', 'Time', units='s')
         self.curve = self.plot(pen=pg.mkPen(color='#00ffff', width=2, style=Qt.PenStyle.SolidLine))
         
+        # Real-time buffer
+        self.max_points = max_points
+        self.data_buffer = []
+        self.time_buffer = []
+        
     def update_data(self, data, x=None):
+        """Update with full dataset (batch mode)."""
         if x is not None:
              self.curve.setData(x=x, y=data)
         else:
              self.curve.setData(data)
+    
+    def update_realtime(self, value: float, timestamp: float = None):
+        """
+        Add a single data point for real-time scrolling display.
+        Data scrolls from right to left.
+        
+        Args:
+            value: New data point value
+            timestamp: Optional timestamp (uses buffer index if not provided)
+        """
+        import time as _time
+        
+        # Add new point to buffer
+        self.data_buffer.append(value)
+        if timestamp is not None:
+            self.time_buffer.append(timestamp)
+        else:
+            self.time_buffer.append(len(self.data_buffer))
+        
+        # Keep buffer size limited (scrolling window)
+        if len(self.data_buffer) > self.max_points:
+            self.data_buffer = self.data_buffer[-self.max_points:]
+            self.time_buffer = self.time_buffer[-self.max_points:]
+        
+        # Update plot with relative time (0 = oldest, max = newest)
+        if self.time_buffer:
+            # Normalize time to start from 0
+            t0 = self.time_buffer[0]
+            relative_time = [t - t0 for t in self.time_buffer]
+            self.curve.setData(x=relative_time, y=self.data_buffer)
+        else:
+            self.curve.setData(self.data_buffer)
+    
+    def clear_realtime_buffer(self):
+        """Clear the real-time data buffer."""
+        self.data_buffer = []
+        self.time_buffer = []
+        self.curve.setData([], [])
+    
+    def get_buffer_data(self) -> list:
+        """Return copy of current buffer data for analysis."""
+        return list(self.data_buffer)
 
 class TrendWidget(pg.PlotWidget):
     def __init__(self, parent=None):
