@@ -3,12 +3,55 @@ QorSense Backend Core Configuration Module.
 
 Provides centralized configuration management using Pydantic Settings.
 Configuration is loaded from environment variables and .env file.
+Supports PyInstaller frozen binary execution.
 """
 
 import os
+import sys
 from typing import List
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# ============================================================================
+# PyInstaller Path Helpers
+# ============================================================================
+
+def is_frozen() -> bool:
+    """Check if running as a frozen PyInstaller binary."""
+    return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
+
+def get_base_path() -> str:
+    """
+    Get the base path for resource files.
+    - Frozen (PyInstaller): sys._MEIPASS
+    - Development: backend directory
+    """
+    if is_frozen():
+        return sys._MEIPASS
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def get_resource_path(relative_path: str) -> str:
+    """
+    Get absolute path to a resource file.
+    Works both in development and frozen binary mode.
+    
+    Example:
+        get_resource_path("assets/logo.png")
+    """
+    return os.path.join(get_base_path(), relative_path)
+
+
+def get_data_path() -> str:
+    """
+    Get path for persistent data files (SQLite, logs).
+    In frozen mode, uses executable directory.
+    """
+    if is_frozen():
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class Settings(BaseSettings):

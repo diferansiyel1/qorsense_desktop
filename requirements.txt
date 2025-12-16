@@ -1,5 +1,5 @@
-# QorSense Backend Dependencies
-# Production dependencies with pinned versions for reproducibility
+# QorSense Desktop Backend Dependencies
+# Production dependencies for PyInstaller packaging
 
 # Web Framework
 fastapi==0.115.5
@@ -10,18 +10,16 @@ python-multipart==0.0.20
 sqlalchemy==2.0.36
 aiosqlite==0.20.0
 greenlet==3.1.1
-alembic==1.17.2
 
 # Data Processing & Analysis
 numpy==2.2.0
 pandas==2.2.3
 scipy==1.14.1
+scikit-learn==1.6.0
+
+# Authentication
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-slowapi==0.1.9
-redis==5.0.1
-prometheus-client==0.19.0
-scikit-learn==1.6.0
 
 # Visualization & Reporting
 plotly==5.24.1
@@ -37,11 +35,3 @@ requests==2.32.3
 pydantic==2.10.3
 pydantic-settings==2.6.1
 email-validator==2.3.0
-
-# UI (for Streamlit if needed)
-streamlit==1.40.2
-
-# Task Queue (Celery + Redis)
-celery[redis]==5.4.0
-redis==5.2.1
-kombu==5.4.2

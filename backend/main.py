@@ -84,7 +84,7 @@ app = FastAPI(
 # Production-safe CORS: Only explicitly allowed origins and methods
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,  # From .env CORS_ORIGINS
+    allow_origins=settings.cors_origins_list + ["app://-", "app://index.html"],  # Add Electron origins
     allow_credentials=settings.cors_allow_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],

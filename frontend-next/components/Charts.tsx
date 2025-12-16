@@ -33,9 +33,9 @@ export function Charts({ data, windowSize, metrics }: ChartsProps) {
     const radarData = metrics ? [
         { subject: 'Bias', A: Math.min(100, Math.abs(metrics.bias) * 20), fullMark: 100 },
         { subject: 'Slope', A: Math.min(100, Math.abs(metrics.slope) * 1000), fullMark: 100 },
-        { subject: 'Noise', A: Math.min(100, metrics.noise_std * 50), fullMark: 100 },
+        { subject: 'Noise', A: Math.min(100, (metrics.noise_std ?? 0) * 50), fullMark: 100 },
         { subject: 'Hysteresis', A: Math.min(100, metrics.hysteresis * 100), fullMark: 100 },
-        { subject: 'Hurst', A: metrics.hurst * 100, fullMark: 100 },
+        { subject: 'Hurst', A: (metrics.hurst ?? 0.5) * 100, fullMark: 100 },
         { subject: 'SNR', A: Math.min(100, metrics.snr_db), fullMark: 100 },
     ] : [];
 

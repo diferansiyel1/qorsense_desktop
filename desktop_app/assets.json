@@ -1,0 +1,45 @@
+[
+  {
+    "name": "Factory Main (Demo)",
+    "children": [
+      {
+        "name": "Production Line A",
+        "children": [
+          {
+            "name": "Sensor-vib-01"
+          },
+          {
+            "name": "Sensor-temp-01"
+          },
+          {
+            "name": "pH"
+          }
+        ]
+      },
+      {
+        "name": "Bioreactor1",
+        "children": []
+      },
+      {
+        "name": "tank",
+        "children": []
+      }
+    ]
+  },
+  {
+    "name": "Polymer1",
+    "children": [
+      {
+        "name": "Reactor3",
+        "children": [
+          {
+            "name": "Visco"
+          },
+          {
+            "name": "OD"
+          }
+        ]
+      }
+    ]
+  }
+]

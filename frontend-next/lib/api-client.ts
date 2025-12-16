@@ -22,8 +22,52 @@ import type { ApiError, HttpError, TokenResponse } from '@/types/api';
 // Configuration
 // ============================================================================
 
-/** API base URL from environment */
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+/** 
+ * API base URL - Dynamic resolution for Electron
+ * 
+ * Priority:
+ * 1. Electron IPC (wenn verfügbar) - dynamischer Port vom Backend
+ * 2. Environment variable NEXT_PUBLIC_API_URL
+ * 3. Default localhost:8000
+ * 
+ * Electron modu için: window.electronAPI.getBackendUrl() kullanılır
+ * Web modu için: NEXT_PUBLIC_API_URL veya default kullanılır
+ */
+let API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+
+/**
+ * Initialize API URL from Electron IPC
+ * Should be called once on app startup
+ */
+async function initializeApiUrl(): Promise<string> {
+    if (typeof window !== 'undefined' && window.electronAPI) {
+        try {
+            const url = await window.electronAPI.getBackendUrl();
+            API_BASE_URL = url;
+
+            // Update Axios instance defaults
+            apiClient.defaults.baseURL = url;
+
+            console.log('[API Client] Electron backend URL set to:', url);
+            return url;
+        } catch (error) {
+            console.warn('[API Client] Failed to get Electron backend URL:', error);
+        }
+    }
+    return API_BASE_URL;
+}
+
+/**
+ * Check if running in Electron
+ */
+function isElectron(): boolean {
+    return typeof window !== 'undefined' && !!window.electronAPI?.isElectron?.();
+}
+
+// Initialize URL on module load (async, updates API_BASE_URL)
+if (typeof window !== 'undefined') {
+    initializeApiUrl();
+}
 
 /** Token storage keys */
 const TOKEN_KEYS = {

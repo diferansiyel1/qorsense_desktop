@@ -1,0 +1,202 @@
+# QorSense Desktop - Build Workflow
+# 
+# Bu workflow, QorSense desktop uygulamasını Windows ve macOS için otomatik olarak derler.
+# 
+# Süreç:
+# 1. Python backend'i PyInstaller ile dondur (platform-specific)
+# 2. Next.js frontend'i static export olarak derle
+# 3. Electron uygulamasını electron-builder ile paketle
+#
+# Tetikleyiciler:
+# - main branch'e push
+# - 'v*' formatında tag oluşturma (release için)
+# - Manuel çalıştırma (workflow_dispatch)
+
+name: Build Desktop App
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      build_windows:
+        description: 'Build for Windows'
+        type: boolean
+        default: true
+      build_macos:
+        description: 'Build for macOS'
+        type: boolean
+        default: true
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
+
+jobs:
+  # ============================================================================
+  # JOB 1: Build Python Backend (Matrix Strategy)
+  # ============================================================================
+  build-backend:
+    name: Build Backend - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact-name: backend-windows
+            binary-name: qorsense-backend.exe
+            output-dir: win
+          - os: macos-latest
+            artifact-name: backend-macos
+            binary-name: qorsense-backend
+            output-dir: mac
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        working-directory: backend
+        run: |
+          pyinstaller build_backend.spec
+          ls -la dist/
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: backend/dist/${{ matrix.binary-name }}
+          retention-days: 7
+
+  # ============================================================================
+  # JOB 2: Build Electron App (Depends on Backend)
+  # ============================================================================
+  build-electron:
+    name: Build Electron - ${{ matrix.os }}
+    needs: build-backend
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            backend-artifact: backend-windows
+            binary-name: qorsense-backend.exe
+            output-dir: win
+            build-command: npm run electron:build:win
+          - os: macos-latest
+            backend-artifact: backend-macos
+            binary-name: qorsense-backend
+            output-dir: mac
+            build-command: npm run electron:build:mac
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend-next/package-lock.json
+
+      - name: Download backend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.backend-artifact }}
+          path: resources/backend-binaries/${{ matrix.output-dir }}
+
+      - name: Make backend executable (Unix)
+        if: runner.os != 'Windows'
+        run: chmod +x resources/backend-binaries/${{ matrix.output-dir }}/${{ matrix.binary-name }}
+
+      - name: List backend binary
+        run: ls -la resources/backend-binaries/${{ matrix.output-dir }}/
+
+      - name: Install npm dependencies
+        working-directory: frontend-next
+        run: npm ci
+
+      - name: Build Next.js static export
+        working-directory: frontend-next
+        run: npm run build
+
+      - name: Build Electron app
+        working-directory: frontend-next
+        run: ${{ matrix.build-command }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List build output
+        run: ls -la dist/
+
+      - name: Upload Electron artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-${{ matrix.output-dir }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.zip
+          retention-days: 30
+
+  # ============================================================================
+  # JOB 3: Create Release (Only on tags)
+  # ============================================================================
+  create-release:
+    name: Create Release
+    needs: build-electron
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: electron-win
+          path: release/
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: electron-mac
+          path: release/
+
+      - name: List release files
+        run: ls -la release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================================
+  # JOB 4: Cleanup Artifacts (Daily)
+  # ============================================================================
+  # Not: Bu job sadece scheduled workflow'larda çalışır
+  # Artifact retention policy ile otomatik temizlik yapılır

@@ -55,10 +55,10 @@ export interface RefreshTokenRequest {
 
 /** User registration request */
 export interface RegisterRequest {
-    username: string;
+    organization_name: string;
     email: string;
     password: string;
-    full_name?: string;
+    full_name: string;
 }
 
 /** Current user profile */

@@ -312,97 +312,87 @@ class SensorAnalyzer:
         
         slope = abs(metrics.get("slope", 0))
         noise_std = metrics.get("noise_std", 0)
-        # We can normalize noise? Or use absolute threshold?
-        # Let's use config. But if we don't have explicit noise threshold config...
-        # We will assume some heuristic or reuse snr/existing check.
-        # reusing LOW_SNR logic for "High Noise" but checking residuals is better.
         
-        # 1. Process Change vs Fault
-        is_high_slope = slope > self.config.slope_warning
-        # Define high noise based on config or heuristic. 
-        # If noise_std is small vs slope?
+        # --- Dynamic Health Score Logic ---
         
-        # Let's use existing logic but refined.
-        
-        # Slope Check (Trend)
-        if slope > self.config.slope_critical:
-            # Critical Trend
-            if noise_std < 0.5: # Clean Signal (Heuristic Threshold, or use config if available)
-                # It's a PROCESS CHANGE
-                 score -= 10 # Small penalty for process change
-                 diagnosis.append("Process Parameter Change Detected")
-                 flags.append("PROCESS_CHANGE")
-                 recommendation = "Verify process settings."
-            else:
-                # It's Complex/Fault
-                score -= 25
-                diagnosis.append("Critical Drift (Unstable)")
-                flags.append("DRIFT_CRITICAL")
-                recommendation = "Immediate calibration required."
-                
-        elif slope > self.config.slope_warning:
-            if noise_std < 0.5:
-                # Process Change
-                diagnosis.append("Minor Process Variation")
-                flags.append("PROCESS_VAR")
-            else:
-                score -= 15
-                diagnosis.append("Moderate Trend Drift")
-                flags.append("DRIFT_WARNING")
-                recommendation = "Schedule maintenance check."
+        # 1. Slope (Trend Stability) Penalty
+        # Linear penalty proportional to how much it exceeds the limit
+        slope_penalty = 0.0
+        if slope > self.config.slope_warning:
+            # Base penalty 5, plus extra based on magnitude
+            # Normalized excess: (slope - warning) / (critical - warning)
+            excess = slope - self.config.slope_warning
+            range_span = max(1e-9, self.config.slope_critical - self.config.slope_warning)
+            factor = min(1.0, excess / range_span) * 20.0 # Max 20 penalty for slope
             
-        # Bias Check (Absolute Shift)
+            slope_penalty = 5.0 + factor
+            
+            if noise_std < 0.5:
+                diagnosis.append("Process Shift Detected")
+                flags.append("PROCESS_SHIFT")
+                recommendation = "Check process parameters."
+            else:
+                 diagnosis.append("Trend Instability")
+                 flags.append("DRIFT")
+                 recommendation = "Monitor sensor for drift."
+
+        score -= slope_penalty
+
+        # 2. Bias (Offset) Penalty
         bias = abs(metrics.get("bias", 0))
-        if bias > self.config.bias_critical:
-            score -= 20
-            diagnosis.append("Significant Bias Shift")
-            flags.append("BIAS_CRITICAL")
-        elif bias > self.config.bias_warning:
-            score -= 10
-            diagnosis.append("Minor Bias Shift")
-            flags.append("BIAS_WARNING")
-
-        # Noise Check (Residuals)
-        # Using SNR from metrics (which uses residuals implicitly in new code or calc_snr_db)
-        snr_db = metrics.get("snr_db", 100)
+        bias_penalty = 0.0
+        if bias > self.config.bias_warning:
+             # Proportional penalty
+             # Max penalty 25 for bias
+             excess = bias - self.config.bias_warning
+             range_span = max(0.1, self.config.bias_critical - self.config.bias_warning)
+             # Logarithmic scaling for bias to avoid punishing massive outliers too hard instantly?
+             # Let's stick to linear clamped for now.
+             factor = min(1.0, excess / range_span) * 20.0
+             
+             bias_penalty = 5.0 + factor
+             diagnosis.append(f"Bias Shift (Avg: {bias:.1f})")
+             flags.append("BIAS")
         
-        # Also check raw noise_std if helpful
-        if noise_std > 2.0: # Heuristic for "High Noise"
-             score -= 20
-             diagnosis.append("High Sensor Noise")
-             flags.append("NOISE_CRITICAL")
-        elif snr_db < 10:
-            score -= 15 
-            diagnosis.append("Critical Signal Quality (SNR)")
-            flags.append("LOW_SNR_CRITICAL")
-        elif snr_db < 20:
-            score -= 5
-            diagnosis.append("Noisy Signal")
-            flags.append("LOW_SNR_WARNING")
-        
-        # Hysteresis
-        hyst = metrics.get("hysteresis", 0)
-        if hyst > self.config.hysteresis_critical:
-            score -= 10
-            diagnosis.append("Hysteresis Detected")
-            flags.append("HYSTERESIS")
+        score -= bias_penalty
 
-        # DFA (Residuals)
-        hurst = metrics.get("hurst", 0.5)
+        # 3. Noise Penalty (Dynamic)
+        # Threshold: 2.0 (Strict) -> 10.0 (Very Noisy)
+        noise_limit = 2.0
+        noise_max = 20.0
+        noise_penalty = 0.0
+        
+        if noise_std > noise_limit:
+            # Linear mapping from 2.0 to 20.0
+            # If noise is 2.0 -> penalty 0 (technically > so epsilon)
+            # If noise is 20.0 -> penalty 30
+            
+            excess_noise = min(noise_max, noise_std) - noise_limit
+            noise_range = noise_max - noise_limit
+            penalty_factor = (excess_noise / noise_range) * 25.0
+            
+            noise_penalty = 5.0 + penalty_factor
+            diagnosis.append(f"High Noise (σ={noise_std:.1f})")
+            flags.append("NOISE")
+            
+        score -= noise_penalty
+        
+        # 4. DFA Validity Check
         hurst_r2 = metrics.get("hurst_r2", 0.0)
-        
         if hurst_r2 < 0.9:
-            diagnosis.append("DFA Unreliable (Low R2)")
-            flags.append("DFA_UNRELIABLE")
-        else:
+            # Small penalty for unreliability
+            score -= 5.0
+            diagnosis.append("DFA Unreliable")
+        
+        # 5. DFA Exponent Check
+        hurst = metrics.get("hurst", 0.5)
+        if hurst_r2 >= 0.9: # Only penalize hurst if R2 is valid
             if hurst > self.config.dfa_critical:
-                score -= 30
-                diagnosis.append("Strong Persistence (Drift/Memory)")
-                flags.append("DFA_PERSISTENCE")
+                 score -= 15.0
+                 diagnosis.append("Strong Persistence")
             elif hurst < 0.2:
-                score -= 10
-                diagnosis.append("Strong Anti-persistence")
-                flags.append("DFA_ANTIPERSISTENCE")
+                 score -= 10.0
+                 diagnosis.append("Anti-persistence")
 
         score = max(0.0, min(100.0, score))
         

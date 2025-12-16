@@ -1,0 +1,22 @@
+# Backend Binaries Directory
+# 
+# Bu klasör, PyInstaller ile oluşturulan Python backend binary'lerini içerir.
+# Her platform için ayrı bir alt klasör bulunur:
+#
+# - win/  : Windows (qorsense-backend.exe)
+# - mac/  : macOS (qorsense-backend)
+# - linux/: Linux (qorsense-backend)
+#
+# Build süreci:
+# 1. cd backend
+# 2. pyinstaller build_backend.spec
+# 3. Binary'yi resources/backend-binaries/<platform>/ klasörüne kopyala
+#
+# electron-builder, package.json'daki extraResources ayarına göre
+# bu dosyaları otomatik olarak pakete dahil eder.
+
+# Bu klasördeki binary dosyaları git'e dahil edilmez
+# CI/CD pipeline'da otomatik olarak oluşturulur
+*.exe
+*.app
+qorsense-backend
