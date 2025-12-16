@@ -19,11 +19,11 @@ class AddSensorDialog(QDialog):
     Also supports custom (user-defined) sensor types and units.
     """
     
-    CUSTOM_CATEGORY = "Özel (Custom)"
+    CUSTOM_CATEGORY = "Custom"
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Yeni Sensör Ekle")
+        self.setWindowTitle("Add New Sensor")
         self.setMinimumWidth(400)
         
         layout = QVBoxLayout(self)
@@ -33,31 +33,31 @@ class AddSensorDialog(QDialog):
         
         # Sensor Name
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("Sensör adı girin...")
-        form_layout.addRow("Sensör Adı:", self.name_input)
+        self.name_input.setPlaceholderText("Enter sensor name...")
+        form_layout.addRow("Sensor Name:", self.name_input)
         
         # Category ComboBox (with Custom option)
         self.category_combo = QComboBox()
         categories = list(SENSOR_CATALOG.keys()) + [self.CUSTOM_CATEGORY]
         self.category_combo.addItems(categories)
         self.category_combo.currentTextChanged.connect(self._on_category_changed)
-        form_layout.addRow("Kategori:", self.category_combo)
+        form_layout.addRow("Category:", self.category_combo)
         
         # Sensor Type ComboBox (editable for custom)
         self.type_combo = QComboBox()
         self.type_combo.setEditable(False)  # Will be enabled for custom
         self.type_combo.currentTextChanged.connect(self._on_type_changed)
-        form_layout.addRow("Sensör Tipi:", self.type_combo)
+        form_layout.addRow("Sensor Type:", self.type_combo)
         
         # Unit ComboBox (editable for custom)
         self.unit_combo = QComboBox()
         self.unit_combo.setEditable(False)  # Will be enabled for custom
-        form_layout.addRow("Birim:", self.unit_combo)
+        form_layout.addRow("Unit:", self.unit_combo)
         
         layout.addLayout(form_layout)
         
         # Info label for custom mode
-        self.custom_hint = QLabel("💡 Custom modda sensör tipi ve birim serbest girilebilir.")
+        self.custom_hint = QLabel("💡 In custom mode, sensor type and unit can be freely entered.")
         self.custom_hint.setStyleSheet("color: #888; font-style: italic;")
         self.custom_hint.setVisible(False)
         layout.addWidget(self.custom_hint)
@@ -82,8 +82,8 @@ class AddSensorDialog(QDialog):
             # Enable free-text entry for custom sensors
             self.type_combo.setEditable(True)
             self.unit_combo.setEditable(True)
-            self.type_combo.setPlaceholderText("Sensör tipini girin...")
-            self.unit_combo.setPlaceholderText("Birimi girin...")
+            self.type_combo.setPlaceholderText("Enter sensor type...")
+            self.unit_combo.setPlaceholderText("Enter unit...")
             self.custom_hint.setVisible(True)
         else:
             # Use predefined catalog
@@ -111,19 +111,19 @@ class AddSensorDialog(QDialog):
         """Validate inputs before accepting the dialog"""
         name = self.name_input.text().strip()
         if not name:
-            QMessageBox.warning(self, "Uyarı", "Lütfen sensör adı girin.")
+            QMessageBox.warning(self, "Warning", "Please enter sensor name.")
             self.name_input.setFocus()
             return
         
         sensor_type = self.type_combo.currentText().strip()
         if not sensor_type:
-            QMessageBox.warning(self, "Uyarı", "Lütfen sensör tipi girin/seçin.")
+            QMessageBox.warning(self, "Warning", "Please enter/select sensor type.")
             self.type_combo.setFocus()
             return
             
         unit = self.unit_combo.currentText().strip()
         if not unit:
-            QMessageBox.warning(self, "Uyarı", "Lütfen birim girin/seçin.")
+            QMessageBox.warning(self, "Warning", "Please enter/select unit.")
             self.unit_combo.setFocus()
             return
         

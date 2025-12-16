@@ -4,18 +4,18 @@ from datetime import datetime
 
 # Standardized Sensor Catalog: Category -> Sensor Type -> Units
 SENSOR_CATALOG = {
-    "Proses Analitik": {
-        "pH Sensörü": ["pH", "mV"],
-        "İletkenlik": ["µS/cm", "mS/cm"],
-        "Çözünmüş Oksijen (DO)": ["mg/L", "ppm", "% Saturation"],
-        "Bulanıklık": ["NTU", "FNU"],
+    "Process Analytics": {
+        "pH Sensor": ["pH", "mV"],
+        "Conductivity": ["µS/cm", "mS/cm"],
+        "Dissolved Oxygen (DO)": ["mg/L", "ppm", "% Saturation"],
+        "Turbidity": ["NTU", "FNU"],
         "ORP (Redox)": ["mV"]
     },
-    "Fiziksel Ölçüm": {
-        "Akış (Flow)": ["L/min", "m3/h", "m/s"],
-        "Basınç": ["bar", "psi", "Pa"],
-        "Sıcaklık": ["°C", "°F", "K"],
-        "Seviye": ["mm", "cm", "%"]
+    "Physical Measurement": {
+        "Flow": ["L/min", "m3/h", "m/s"],
+        "Pressure": ["bar", "psi", "Pa"],
+        "Temperature": ["°C", "°F", "K"],
+        "Level": ["mm", "cm", "%"]
     }
 }
 
@@ -34,7 +34,7 @@ class SensorCreate(BaseModel):
     location: str
     source_type: str = "CSV"
     organization_id: Optional[str] = None
-    sensor_type: str  # Required: e.g., "pH Sensörü", "Sıcaklık"
+    sensor_type: str  # Required: e.g., "pH Sensor", "Temperature"
     unit: str  # Required: e.g., "pH", "°C"
 
 class SensorResponse(BaseModel):

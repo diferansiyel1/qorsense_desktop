@@ -302,107 +302,104 @@ class SensorAnalyzer:
             return f"{mins} mins"
 
     def get_health_score(self, metrics: Dict[str, float]) -> Dict[str, Any]:
-        """Calculate weighted health score with new Decision Logic."""
+        """
+        Calculate health score using Web application logic.
+        
+        Scoring Logic (Web Version):
+        - Starting Score: 100
+        - Slope + Noise interaction rules
+        - Bias threshold penalties
+        - Noise/SNR penalties
+        - DFA/Hurst penalties (high: 30 points)
+        """
         score = 100.0
         diagnosis = []
         flags = []
         recommendation = "System operating normally."
         
-        # --- Decision Logic Refinement ---
-        
+        # Extract metrics
         slope = abs(metrics.get("slope", 0))
         noise_std = metrics.get("noise_std", 0)
+        bias = abs(metrics.get("bias", 0))
+        snr_db = metrics.get("snr_db", 50)
+        hurst = metrics.get("hurst", 0.5)
         
-        # --- Dynamic Health Score Logic ---
-        
-        # 1. Slope (Trend Stability) Penalty
-        # Linear penalty proportional to how much it exceeds the limit
-        slope_penalty = 0.0
-        if slope > self.config.slope_warning:
-            # Base penalty 5, plus extra based on magnitude
-            # Normalized excess: (slope - warning) / (critical - warning)
-            excess = slope - self.config.slope_warning
-            range_span = max(1e-9, self.config.slope_critical - self.config.slope_warning)
-            factor = min(1.0, excess / range_span) * 20.0 # Max 20 penalty for slope
-            
-            slope_penalty = 5.0 + factor
-            
+        # --- SLOPE (Trend) Penalties ---
+        if slope > self.config.slope_critical:
             if noise_std < 0.5:
-                diagnosis.append("Process Shift Detected")
-                flags.append("PROCESS_SHIFT")
+                # Process Change (not sensor issue)
+                score -= 10
+                diagnosis.append("Process Change Detected")
+                flags.append("PROCESS_CHANGE")
                 recommendation = "Check process parameters."
             else:
-                 diagnosis.append("Trend Instability")
-                 flags.append("DRIFT")
-                 recommendation = "Monitor sensor for drift."
-
-        score -= slope_penalty
-
-        # 2. Bias (Offset) Penalty
-        bias = abs(metrics.get("bias", 0))
-        bias_penalty = 0.0
-        if bias > self.config.bias_warning:
-             # Proportional penalty
-             # Max penalty 25 for bias
-             excess = bias - self.config.bias_warning
-             range_span = max(0.1, self.config.bias_critical - self.config.bias_warning)
-             # Logarithmic scaling for bias to avoid punishing massive outliers too hard instantly?
-             # Let's stick to linear clamped for now.
-             factor = min(1.0, excess / range_span) * 20.0
-             
-             bias_penalty = 5.0 + factor
-             diagnosis.append(f"Bias Shift (Avg: {bias:.1f})")
-             flags.append("BIAS")
+                # Critical Drift (sensor deterioration)
+                score -= 25
+                diagnosis.append("Critical Drift")
+                flags.append("CRITICAL_DRIFT")
+                recommendation = "Sensor calibration required!"
+        elif slope > self.config.slope_warning:
+            # Moderate Drift
+            score -= 15
+            diagnosis.append("Moderate Drift")
+            flags.append("DRIFT")
+            recommendation = "Monitor sensor, drift detected."
         
-        score -= bias_penalty
-
-        # 3. Noise Penalty (Dynamic)
-        # Threshold: 2.0 (Strict) -> 10.0 (Very Noisy)
-        noise_limit = 2.0
-        noise_max = 20.0
-        noise_penalty = 0.0
+        # --- BIAS (Offset) Penalties ---
+        if bias > self.config.bias_critical:
+            score -= 20
+            diagnosis.append(f"Critical Bias (Δ={bias:.2f})")
+            flags.append("CRITICAL_BIAS")
+            recommendation = "Sensor reset or replacement required."
+        elif bias > self.config.bias_warning:
+            score -= 10
+            diagnosis.append(f"Bias Warning (Δ={bias:.2f})")
+            flags.append("BIAS")
         
-        if noise_std > noise_limit:
-            # Linear mapping from 2.0 to 20.0
-            # If noise is 2.0 -> penalty 0 (technically > so epsilon)
-            # If noise is 20.0 -> penalty 30
-            
-            excess_noise = min(noise_max, noise_std) - noise_limit
-            noise_range = noise_max - noise_limit
-            penalty_factor = (excess_noise / noise_range) * 25.0
-            
-            noise_penalty = 5.0 + penalty_factor
-            diagnosis.append(f"High Noise (σ={noise_std:.1f})")
-            flags.append("NOISE")
-            
-        score -= noise_penalty
+        # --- NOISE Penalties ---
+        if noise_std > 2.0:
+            score -= 20
+            diagnosis.append(f"High Noise (σ={noise_std:.2f})")
+            flags.append("HIGH_NOISE")
+            recommendation = "Check noise source."
         
-        # 4. DFA Validity Check
-        hurst_r2 = metrics.get("hurst_r2", 0.0)
-        if hurst_r2 < 0.9:
-            # Small penalty for unreliability
-            score -= 5.0
-            diagnosis.append("DFA Unreliable")
+        # SNR Penalties
+        if snr_db < 10:
+            score -= 15
+            diagnosis.append(f"Very Low SNR ({snr_db:.1f} dB)")
+            flags.append("CRITICAL_SNR")
+        elif snr_db < 20:
+            score -= 5
+            diagnosis.append(f"Low SNR ({snr_db:.1f} dB)")
+            flags.append("LOW_SNR")
         
-        # 5. DFA Exponent Check
-        hurst = metrics.get("hurst", 0.5)
-        if hurst_r2 >= 0.9: # Only penalize hurst if R2 is valid
-            if hurst > self.config.dfa_critical:
-                 score -= 15.0
-                 diagnosis.append("Strong Persistence")
-            elif hurst < 0.2:
-                 score -= 10.0
-                 diagnosis.append("Anti-persistence")
-
+        # --- DFA / HURST Penalties ---
+        if hurst > self.config.dfa_critical:  # 0.8
+            # IMPORTANT: Web version has high penalty (30 points)
+            score -= 30
+            diagnosis.append(f"Strong Persistence (H={hurst:.2f})")
+            flags.append("PERSISTENCE")
+            recommendation = "Sensor correlation anomaly - maintenance required."
+        elif hurst < 0.2:
+            score -= 10
+            diagnosis.append(f"Anti-persistence (H={hurst:.2f})")
+            flags.append("ANTI_PERSISTENCE")
+        
+        # Clamp score
         score = max(0.0, min(100.0, score))
         
-        status = "Green"
-        if score < 60: status = "Red"
-        elif score < 85: status = "Yellow"
-            
+        # Determine status
+        if score < 60:
+            status = "Red"
+        elif score < 85:
+            status = "Yellow"
+        else:
+            status = "Green"
+        
+        # Default diagnosis if none
         if not diagnosis:
             diagnosis.append("System Normal")
-            
+        
         return {
             "score": score,
             "status": status,
@@ -410,3 +407,4 @@ class SensorAnalyzer:
             "flags": flags,
             "recommendation": recommendation
         }
+
