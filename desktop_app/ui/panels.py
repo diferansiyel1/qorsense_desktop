@@ -1,13 +1,143 @@
 from PyQt6.QtWidgets import (QDockWidget, QTreeWidget, QTreeWidgetItem, 
-                             QTableWidget, QTableWidgetItem, QHeaderView)
+                             QTableWidget, QTableWidgetItem, QHeaderView,
+                             QMenu, QInputDialog, QMessageBox, QDialog, 
+                             QDialogButtonBox, QComboBox, QFormLayout, 
+                             QLineEdit, QVBoxLayout, QLabel)
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QIcon, QAction
 
 import json
 import os
-from PyQt6.QtWidgets import (QDockWidget, QTreeWidget, QTreeWidgetItem, 
-                             QMenu, QInputDialog, QMessageBox)
-from PyQt6.QtGui import QIcon, QAction
+
+from backend.models import SENSOR_CATALOG
+
+
+class AddSensorDialog(QDialog):
+    """
+    Dialog for adding a new sensor with cascading ComboBoxes:
+    Category -> Sensor Type -> Unit
+    Also supports custom (user-defined) sensor types and units.
+    """
+    
+    CUSTOM_CATEGORY = "Özel (Custom)"
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Yeni Sensör Ekle")
+        self.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(self)
+        
+        # Form layout for inputs
+        form_layout = QFormLayout()
+        
+        # Sensor Name
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("Sensör adı girin...")
+        form_layout.addRow("Sensör Adı:", self.name_input)
+        
+        # Category ComboBox (with Custom option)
+        self.category_combo = QComboBox()
+        categories = list(SENSOR_CATALOG.keys()) + [self.CUSTOM_CATEGORY]
+        self.category_combo.addItems(categories)
+        self.category_combo.currentTextChanged.connect(self._on_category_changed)
+        form_layout.addRow("Kategori:", self.category_combo)
+        
+        # Sensor Type ComboBox (editable for custom)
+        self.type_combo = QComboBox()
+        self.type_combo.setEditable(False)  # Will be enabled for custom
+        self.type_combo.currentTextChanged.connect(self._on_type_changed)
+        form_layout.addRow("Sensör Tipi:", self.type_combo)
+        
+        # Unit ComboBox (editable for custom)
+        self.unit_combo = QComboBox()
+        self.unit_combo.setEditable(False)  # Will be enabled for custom
+        form_layout.addRow("Birim:", self.unit_combo)
+        
+        layout.addLayout(form_layout)
+        
+        # Info label for custom mode
+        self.custom_hint = QLabel("💡 Custom modda sensör tipi ve birim serbest girilebilir.")
+        self.custom_hint.setStyleSheet("color: #888; font-style: italic;")
+        self.custom_hint.setVisible(False)
+        layout.addWidget(self.custom_hint)
+        
+        # Dialog buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(self._validate_and_accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        # Initialize cascading dropdowns
+        self._on_category_changed(self.category_combo.currentText())
+    
+    def _on_category_changed(self, category: str):
+        """Update sensor type options based on selected category"""
+        self.type_combo.clear()
+        self.unit_combo.clear()
+        
+        if category == self.CUSTOM_CATEGORY:
+            # Enable free-text entry for custom sensors
+            self.type_combo.setEditable(True)
+            self.unit_combo.setEditable(True)
+            self.type_combo.setPlaceholderText("Sensör tipini girin...")
+            self.unit_combo.setPlaceholderText("Birimi girin...")
+            self.custom_hint.setVisible(True)
+        else:
+            # Use predefined catalog
+            self.type_combo.setEditable(False)
+            self.unit_combo.setEditable(False)
+            self.custom_hint.setVisible(False)
+            if category in SENSOR_CATALOG:
+                sensor_types = list(SENSOR_CATALOG[category].keys())
+                self.type_combo.addItems(sensor_types)
+    
+    def _on_type_changed(self, sensor_type: str):
+        """Update unit options based on selected sensor type"""
+        category = self.category_combo.currentText()
+        
+        # Don't clear unit combo if in custom mode and user is typing
+        if category == self.CUSTOM_CATEGORY:
+            return
+            
+        self.unit_combo.clear()
+        if category in SENSOR_CATALOG and sensor_type in SENSOR_CATALOG[category]:
+            units = SENSOR_CATALOG[category][sensor_type]
+            self.unit_combo.addItems(units)
+    
+    def _validate_and_accept(self):
+        """Validate inputs before accepting the dialog"""
+        name = self.name_input.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Uyarı", "Lütfen sensör adı girin.")
+            self.name_input.setFocus()
+            return
+        
+        sensor_type = self.type_combo.currentText().strip()
+        if not sensor_type:
+            QMessageBox.warning(self, "Uyarı", "Lütfen sensör tipi girin/seçin.")
+            self.type_combo.setFocus()
+            return
+            
+        unit = self.unit_combo.currentText().strip()
+        if not unit:
+            QMessageBox.warning(self, "Uyarı", "Lütfen birim girin/seçin.")
+            self.unit_combo.setFocus()
+            return
+        
+        self.accept()
+    
+    def get_sensor_data(self) -> dict:
+        """Return the sensor data from the dialog inputs"""
+        return {
+            "name": self.name_input.text().strip(),
+            "category": self.category_combo.currentText(),
+            "sensor_type": self.type_combo.currentText().strip(),
+            "unit": self.unit_combo.currentText().strip()
+        }
+
 
 class FieldExplorerPanel(QDockWidget):
     # Signal emitted when a sensor is selected (path as string)
@@ -94,12 +224,29 @@ class FieldExplorerPanel(QDockWidget):
             self.save_assets()
 
     def add_child_item(self, parent_item, type_name):
-        if parent_item is None: return
-        name, ok = QInputDialog.getText(self, f"Add {type_name}", f"{type_name} Name:")
-        if ok and name:
-            item = QTreeWidgetItem(parent_item, [name])
-            parent_item.setExpanded(True)
-            self.save_assets()
+        if parent_item is None: 
+            return
+            
+        if type_name == "Sensor":
+            # Use the new AddSensorDialog for sensors
+            dialog = AddSensorDialog(self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                sensor_data = dialog.get_sensor_data()
+                if sensor_data:
+                    # Create display name with type and unit info
+                    display_name = f"{sensor_data['name']} ({sensor_data['sensor_type']} - {sensor_data['unit']})"
+                    item = QTreeWidgetItem(parent_item, [display_name])
+                    # Store metadata in item data
+                    item.setData(0, Qt.ItemDataRole.UserRole, sensor_data)
+                    parent_item.setExpanded(True)
+                    self.save_assets()
+        else:
+            # For other types (Line), use simple input dialog
+            name, ok = QInputDialog.getText(self, f"Add {type_name}", f"{type_name} Name:")
+            if ok and name:
+                item = QTreeWidgetItem(parent_item, [name])
+                parent_item.setExpanded(True)
+                self.save_assets()
             
     def remove_item(self, item):
         if item is None: return
@@ -128,7 +275,19 @@ class FieldExplorerPanel(QDockWidget):
                 
                 for k in range(line_item.childCount()):
                     sensor_item = line_item.child(k)
-                    line["children"].append({"name": sensor_item.text(0)})
+                    # Get sensor metadata if available
+                    sensor_data = sensor_item.data(0, Qt.ItemDataRole.UserRole)
+                    if sensor_data and isinstance(sensor_data, dict):
+                        sensor_entry = {
+                            "name": sensor_data.get("name", sensor_item.text(0)),
+                            "sensor_type": sensor_data.get("sensor_type", ""),
+                            "unit": sensor_data.get("unit", ""),
+                            "category": sensor_data.get("category", "")
+                        }
+                    else:
+                        # Legacy sensors without metadata
+                        sensor_entry = {"name": sensor_item.text(0)}
+                    line["children"].append(sensor_entry)
                     
                 factory["children"].append(line)
             
@@ -158,7 +317,20 @@ class FieldExplorerPanel(QDockWidget):
                     l_item = QTreeWidgetItem(f_item, [line["name"]])
                     l_item.setExpanded(True)
                     for sensor in line.get("children", []):
-                        QTreeWidgetItem(l_item, [sensor["name"]])
+                        # Check for sensor metadata
+                        if "sensor_type" in sensor and "unit" in sensor and sensor["sensor_type"]:
+                            display_name = f"{sensor['name']} ({sensor['sensor_type']} - {sensor['unit']})"
+                            sensor_item = QTreeWidgetItem(l_item, [display_name])
+                            # Store metadata
+                            sensor_item.setData(0, Qt.ItemDataRole.UserRole, {
+                                "name": sensor["name"],
+                                "sensor_type": sensor.get("sensor_type", ""),
+                                "unit": sensor.get("unit", ""),
+                                "category": sensor.get("category", "")
+                            })
+                        else:
+                            # Legacy sensors without metadata
+                            QTreeWidgetItem(l_item, [sensor["name"]])
                         
         except Exception as e:
             print(f"Failed to load assets: {e}")

@@ -2,6 +2,23 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 
+# Standardized Sensor Catalog: Category -> Sensor Type -> Units
+SENSOR_CATALOG = {
+    "Proses Analitik": {
+        "pH Sensörü": ["pH", "mV"],
+        "İletkenlik": ["µS/cm", "mS/cm"],
+        "Çözünmüş Oksijen (DO)": ["mg/L", "ppm", "% Saturation"],
+        "Bulanıklık": ["NTU", "FNU"],
+        "ORP (Redox)": ["mV"]
+    },
+    "Fiziksel Ölçüm": {
+        "Akış (Flow)": ["L/min", "m3/h", "m/s"],
+        "Basınç": ["bar", "psi", "Pa"],
+        "Sıcaklık": ["°C", "°F", "K"],
+        "Seviye": ["mm", "cm", "%"]
+    }
+}
+
 class SensorConfig(BaseModel):
     slope_critical: float = 0.1
     slope_warning: float = 0.05
@@ -17,6 +34,8 @@ class SensorCreate(BaseModel):
     location: str
     source_type: str = "CSV"
     organization_id: Optional[str] = None
+    sensor_type: str  # Required: e.g., "pH Sensörü", "Sıcaklık"
+    unit: str  # Required: e.g., "pH", "°C"
 
 class SensorResponse(BaseModel):
     id: str
