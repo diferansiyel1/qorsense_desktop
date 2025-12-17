@@ -1,145 +1,139 @@
-# QorSense v1 - Advanced Industrial Sensor Monitoring
+# QorSense Desktop - Mission-Control v3.0
 
-QorSense v1 is a production-ready predictive maintenance application designed to monitor industrial sensor data (Flow, Pressure, Temperature). It combines a high-performance **FastAPI** backend for advanced mathematical analysis with a modern **Next.js** frontend for a responsive, professional dashboard.
-
-![Dashboard Screenshot](frontend-next/public/window.svg)
+**QorSense Desktop** is a high-performance, hardware-locked predictive maintenance and sensor analytics platform designed for industrial environments. Built with **Python (PyQt6)**, it offers real-time monitoring via **Modbus TCP/RTU**, advanced signal analysis, and a secure licensing system.
 
 ## 🚀 Key Features
 
-### 1. Real-Time Monitoring & Analysis
-- **Live Data Streaming**: Visualize sensor data in real-time with dynamic charts.
-- **Multi-Metric Analysis**: Simultaneous calculation of:
-  - **Bias & Slope**: Detect drift and offset.
-  - **SNR (Signal-to-Noise Ratio)**: Monitor signal quality.
-  - **Hysteresis**: Detect mechanical play or lag.
-  - **Hurst Exponent (DFA)**: Identify long-term memory and persistence in signal patterns.
+### 1. Robust Data Acquisition
+- **Modbus TCP & RTU**: Native support for industrial sensors (e.g., Hamilton VisiWater/Arc) over Ethernet or RS485/Serial.
+- **Legacy Support**: Import and analyze historical data from CSV/Excel files.
+- **Smart Connection Dialog**: Auto-scans COM ports and provides pre-configured settings for standard sensors.
 
-### 2. Predictive Maintenance (RUL)
-- **RUL Prediction**: Estimates **Remaining Useful Life** based on current drift trends and critical thresholds.
-- **AI Diagnosis**: Rule-based AI engine provides instant diagnosis (e.g., "Critical Trend Drift", "High Noise Level") and actionable recommendations.
+### 2. Advanced Signal Analytics
+- **Real-Time Health Engine**: 
+  - **DFA (Detrended Fluctuation Analysis)**: Detects long-range correlations and fractal patterns.
+  - **SNR (Signal-to-Noise Ratio)**: Monitors signal quality.
+  - **Bias & Slope**: Quantifies drift and trend direction.
+- **Automated Diagnosis**: Rule-based AI provides instant health scores (0-100), status updates, and actionable recommendations.
 
-### 3. Data Flexibility
-- **Synthetic Data Generator**: Simulate various scenarios (Normal, Drifting, Noisy, Oscillation) for testing and demo purposes.
-- **CSV Upload**: Import and analyze your own historical sensor data files (`.csv`, `.txt`).
+### 3. Hardware-Locked Security
+- **Fingerprinting**: Generates unique Machine IDs based on hardware MAC address and hostname.
+- **Secure Activation**: Requires a valid license key generated specifically for the target machine.
+- **Offline Capable**: License verification works completely offline; no internet connection required.
 
-### 4. Professional Reporting
-- **PDF Export**: Generate comprehensive PDF reports including:
-  - System Health Score (0-100)
-  - Detailed Metrics Table
-  - AI Diagnosis & Recommendations
-  - Visual Trend Charts
-
-### 5. Modern UI/UX
-- **Interactive Dashboard**: Built with Next.js, Tailwind CSS, and Recharts.
-- **Radar Charts**: Multi-dimensional visualization of sensor health metrics.
-- **Responsive Design**: Optimized for various screen sizes.
-- **Dark/Light Mode**: Adaptive visual themes.
+### 4. Professional UI/UX
+- **Fusion Dark Theme**: Modern, eye-friendly interface optimized for control room environments.
+- **Oscilloscope View**: Smooth, real-time scrolling charts for live signal visualization.
+- **Interactive Tools**: Field Explorer, Alarm Panel, and persistent application settings.
 
 ---
 
-## 🏗 Architecture
+## 🏗 System Architecture
 
-The project follows a modern full-stack architecture:
-
-- **Backend (Python/FastAPI)**:
-  - `analysis.py`: Core math engine (NumPy, SciPy, Pandas).
-  - `main.py`: REST API endpoints.
-  - `report_gen.py`: PDF generation logic.
-- **Frontend (TypeScript/Next.js)**:
-  - `app/`: App Router based pages.
-  - `components/`: Reusable UI components (Sidebar, Charts, MetricCards).
-  - `lib/api.ts`: Typed API client.
+The application follows a modular architecture separating the UI, business logic, and core analysis engine:
 
 ```mermaid
-graph LR
-    A[Sensor Data] -->|Live/CSV| B(Next.js Frontend)
-    B -->|REST API| C{FastAPI Backend}
-    C -->|Math Engine| D[Analysis]
-    D -->|RUL/Health| C
-    C -->|JSON| B
-    B -->|Request PDF| E[Report Generator]
-    E -->|PDF File| B
+graph TD
+    User[User / Operator] -->|Interacts| UI[Desktop UI (PyQt6)]
+    
+    subgraph "Frontend Layer"
+        UI -->|Config| ConnDialog[Connection Dialog]
+        UI -->|View| Oscilloscope[PyQtGraph Charts]
+        UI -->|Control| LicenseDlg[License Dialog]
+    end
+    
+    subgraph "Worker Layer (QThread)"
+        LiveWorker[Modbus Worker]
+        FileWorker[File Loader]
+        AnalysisWorker[Analysis Worker]
+    end
+    
+    subgraph "Core Backend"
+        LM[License Manager]
+        Bridge[Analyzer Bridge]
+        Engine[Analysis Engine (NumPy/SciPy)]
+    end
+    
+    ConnDialog --> LiveWorker
+    LiveWorker -->|Signals| Oscilloscope
+    LicenseDlg -->|Verify| LM
+    AnalysisWorker -->|Compute| Engine
+    
+    UI --> AnalysisWorker
 ```
+
+### Component Details
+- **`desktop_app/ui/`**: Contains strict UI components (`main_window.py`, `license_dialog.py`).
+- **`desktop_app/workers/`**: Background threads for non-blocking operations (`live_worker.py` for Modbus, `analysis_worker.py` for heavy math).
+- **`backend/analysis.py`**: The synchronized math engine shared with the web version.
+- **`backend/license_manager.py`**: Handles SHA-256 fingerprinting and key verification.
 
 ---
 
-## � Installation & Setup
+## 🛠 Installation & Setup
 
 ### Prerequisites
-- **Python 3.9+**
-- **Node.js 18+** & **npm**
+- Python 3.10+
+- pip (Python Package Manager)
 
-### 1. Clone Repository
+### Step 1: Clone & Setup Environment
 ```bash
-git clone https://github.com/diferansiyel1/qorsense_v1.git
-cd qorsense_v1
-```
+git clone https://github.com/diferansiyel1/qorsense_desktop.git
+cd qorsense_desktop
 
-### 2. Backend Setup
-```bash
-# Create virtual environment (optional but recommended)
+# Create virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+source venv/bin/activate  # Windows: venv\Scripts\activate
 ```
 
-### 3. Frontend Setup
+### Step 2: Install Dependencies
 ```bash
-cd frontend-next
-npm install
-cd ..
+pip install -r desktop_app/requirements.txt
+```
+
+### Step 3: Run the Application
+```bash
+python desktop_app/main.py
 ```
 
 ---
 
-## ▶️ Running the Application
+## 🔑 Licensing & Activation
 
-We provide a convenient script to launch both the backend and frontend simultaneously:
+### For Users
+1. Upon first launch, the **License Activation** dialog will appear.
+2. Copy your **Machine ID** (e.g., `A35C7B79-BFE9-BE24-2EBB-9160AAB960CC`).
+3. Send this ID to Pikolab Support.
+4. Enter the received **License Key** to activate your copy.
+
+### For Administrators (Key Generation)
+A standalone tool is included for generating keys:
 
 ```bash
-chmod +x run_next.sh
-./run_next.sh
+# Launch the generator tool
+python tools/license_generator.py
 ```
-
-This will:
-1. Start the **FastAPI Backend** on `http://localhost:8000`
-2. Start the **Next.js Frontend** on `http://localhost:3000`
-3. Automatically open the dashboard in your browser.
+1. Paste the customer's Machine ID.
+2. Click **Generate License Key**.
+3. Send the generated generic key to the customer.
 
 ---
 
-## 🐳 Docker Deployment (Production)
+## 📡 Modbus Configuration
 
-For production environments, use the optimized Docker setup:
+The `ConnectionDialog` supports standard Modbus parameters:
 
-```bash
-# Build and start services (Backend, Frontend, Redis)
-docker-compose -f docker-compose.prod.yml up -d --build
-```
-
-This setup includes:
-- **FastAPI Backend** (Optimized Python 3.11 slim image)
-- **Next.js Frontend** (Standalone output, Node 20 Alpine)
-- **Redis** (Caching layer)
-- Health checks and automatic restarts
-
-Access the application at `http://localhost:3000`.
-
----
- 
-## 🧪 Testing
-
-Run the backend unit tests to verify the analysis engine:
-
-```bash
-# Run tests using pytest
-pytest tests/
-```
+| Parameter | Default (Hamilton) | Options |
+|-----------|--------------------|---------|
+| **Baud Rate** | 19200 | 9600, 19200, 38400... |
+| **Parity** | Even (E) | None, Even, Odd |
+| **Stop Bits** | 1 | 1, 2 |
+| **Byte Size** | 8 | 8 |
+| **Format** | Float32 Big-Endian | Float32 BE, Int16... |
 
 ---
 
 ## 📄 License
 
-Proprietary - QorSense Technologies.
+**Copyright © 2025 Pikolab R&D Ltd. Co.**
+All Rights Reserved. Unauthorized copying, distribution, or reverse engineering of this software is strictly prohibited.
