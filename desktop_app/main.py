@@ -52,7 +52,32 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     apply_dark_theme(app)
     
+    # --- LICENSE CHECK ---
+    from backend.license_manager import LicenseManager
+    from desktop_app.ui.license_dialog import LicenseDialog
+    
+    license_manager = LicenseManager()
+    
+    # Check if valid license exists
+    if not license_manager.is_licensed():
+        logging.info("No valid license found. Showing license dialog...")
+        
+        dialog = LicenseDialog(license_manager)
+        result = dialog.exec()
+        
+        if result != LicenseDialog.DialogCode.Accepted:
+            logging.warning("License activation cancelled. Exiting application.")
+            sys.exit(1)
+        
+        # Verify again after dialog
+        if not license_manager.is_licensed():
+            logging.error("License verification failed after dialog. Exiting.")
+            sys.exit(1)
+    
+    logging.info("License verified. Starting main application...")
+    
     window = QorSenseMainWindow()
     window.show()
     
     sys.exit(app.exec())
+
