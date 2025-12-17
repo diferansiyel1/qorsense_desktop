@@ -155,18 +155,26 @@ class LicenseDialog(QDialog):
         
         self.license_key_input = QLineEdit()
         self.license_key_input.setPlaceholderText("XXXX-XXXX-XXXX-XXXX")
-        self.license_key_input.setFont(QFont("Consolas", 12))
+        self.license_key_input.setFont(QFont("Consolas", 13))
         self.license_key_input.setMaxLength(19)  # XXXX-XXXX-XXXX-XXXX = 19 chars
+        self.license_key_input.setMinimumHeight(42)  # Balanced height
         self.license_key_input.setStyleSheet("""
             QLineEdit {
-                background-color: #2A2A2A;
-                color: #FFF;
-                border: 2px solid #555;
-                border-radius: 4px;
-                padding: 10px;
+                background-color: #1E1E1E;
+                color: #FFFFFF;
+                border: 2px solid #00ADB5;
+                border-radius: 5px;
+                padding: 8px 12px;
+                font-size: 14px;
+                font-weight: bold;
+                letter-spacing: 1px;
             }
             QLineEdit:focus {
-                border-color: #00ADB5;
+                border-color: #00C4CC;
+                background-color: #252525;
+            }
+            QLineEdit::placeholder {
+                color: #666666;
             }
         """)
         self.license_key_input.textChanged.connect(self._format_license_key)

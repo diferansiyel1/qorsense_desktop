@@ -22,7 +22,7 @@ from desktop_app.workers.file_loader import FileLoadWorker
 from desktop_app.workers.live_worker import ModbusWorker
 # Import list_available_ports for COM port scanning
 from desktop_app.workers.live_worker import list_available_ports
-from backend.models import SensorConfig
+from backend.models import SensorConfig, SENSOR_CATALOG
 
 logger = logging.getLogger("MainWindow")
 
@@ -55,6 +55,30 @@ class ConnectionDialog(QDialog):
         self.setMinimumWidth(480)
         
         layout = QVBoxLayout(self)
+        
+        # --- Sensor Identity Selection ---
+        sensor_group = QGroupBox("Sensör Kimliği")
+        sensor_layout = QFormLayout(sensor_group)
+        
+        # Collect all sensor types from SENSOR_CATALOG
+        all_sensor_types = []
+        for category, sensors in SENSOR_CATALOG.items():
+            all_sensor_types.extend(sensors.keys())
+        all_sensor_types = sorted(set(all_sensor_types))
+        
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(all_sensor_types)
+        self.type_combo.currentTextChanged.connect(self._update_units)
+        sensor_layout.addRow("Sensör Tipi:", self.type_combo)
+        
+        self.unit_combo = QComboBox()
+        sensor_layout.addRow("Birim:", self.unit_combo)
+        
+        # Initialize units for first sensor type
+        if all_sensor_types:
+            self._update_units(all_sensor_types[0])
+        
+        layout.addWidget(sensor_group)
         
         # --- Source Type Selection ---
         source_group = QGroupBox("Data Source")
@@ -203,6 +227,26 @@ class ConnectionDialog(QDialog):
                 self.com_port_combo.addItem(display, port_name)
         else:
             self.com_port_combo.addItem("No ports found", "")
+    
+    def _update_units(self, sensor_type: str):
+        """Seçilen sensör tipine göre birim listesini günceller."""
+        self.unit_combo.clear()
+        # SENSOR_CATALOG yapısını tara (Kategori -> Tip -> Birimler)
+        found = False
+        for cat_name, sensors in SENSOR_CATALOG.items():
+            if sensor_type in sensors:
+                self.unit_combo.addItems(sensors[sensor_type])
+                found = True
+                break
+        if not found:
+            self.unit_combo.addItem("-")
+    
+    def get_metadata(self) -> dict:
+        """Seçilen sensör tipi ve birimini döndürür."""
+        return {
+            "sensor_type": self.type_combo.currentText(),
+            "unit": self.unit_combo.currentText()
+        }
     
     def get_source_type(self) -> str:
         """Return selected source type."""
@@ -686,10 +730,14 @@ class QorSenseMainWindow(QMainWindow):
             
             if source_type == ConnectionDialog.SOURCE_CSV:
                 # Use existing file dialog
+                metadata = dialog.get_metadata()
+                logger.info(f"CSV mode selected with sensor: {metadata}")
                 self.load_data_dialog()
             elif source_type in (ConnectionDialog.SOURCE_TCP, ConnectionDialog.SOURCE_RTU):
                 # Start Modbus live monitoring (TCP or RTU)
                 config = dialog.get_modbus_config()
+                metadata = dialog.get_metadata()
+                logger.info(f"Modbus {source_type.upper()} mode selected with sensor: {metadata}")
                 self.start_live_monitoring(config)
 
     # --- LIVE MONITORING (Modbus TCP/RTU) ---

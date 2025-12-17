@@ -69,5 +69,21 @@
         ]
       }
     ]
+  },
+  {
+    "name": "Water_Treatment",
+    "children": [
+      {
+        "name": "WT1",
+        "children": [
+          {
+            "name": "Temp",
+            "sensor_type": "Temperature",
+            "unit": "\u00b0C",
+            "category": "Physical Measurement"
+          }
+        ]
+      }
+    ]
   }
 ]
