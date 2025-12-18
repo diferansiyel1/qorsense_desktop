@@ -45,84 +45,105 @@ class LicenseGeneratorWindow(QMainWindow):
         
     def _setup_ui(self):
         self.setWindowTitle("Pikolab License Key Generator")
-        self.setFixedSize(600, 500)
+        self.resize(600, 650)  # Increased height to fit stacked layout comfortably
         
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
         layout = QVBoxLayout(central_widget)
-        layout.setSpacing(20)
+        layout.setSpacing(15)
         layout.setContentsMargins(30, 30, 30, 30)
         
         # --- Header ---
         header_label = QLabel("🔑 Pikolab License Key Generator")
-        header_label.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+        header_label.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
         header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header_label.setStyleSheet("color: #00ADB5;")
+        header_label.setStyleSheet("color: #00ADB5; margin-bottom: 5px;")
         layout.addWidget(header_label)
         
         warning_label = QLabel("⚠️ FOR INTERNAL USE ONLY - DO NOT DISTRIBUTE!")
-        warning_label.setFont(QFont("Segoe UI", 10))
+        warning_label.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
         warning_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        warning_label.setStyleSheet("color: #FF6B6B; font-weight: bold;")
+        warning_label.setStyleSheet("color: #FF6B6B; letter-spacing: 1px;")
         layout.addWidget(warning_label)
+        
+        # --- Spacer ---
+        layout.addSpacing(10)
         
         # --- Separator ---
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setStyleSheet("background-color: #444;")
+        separator.setStyleSheet("background-color: #444; margin-bottom: 10px;")
         layout.addWidget(separator)
         
         # --- Input Section ---
         input_group = QGroupBox("Müşteri Bilgileri")
-        input_group.setFont(QFont("Segoe UI", 11))
-        input_layout = QFormLayout(input_group)
-        input_layout.setSpacing(15)
+        input_group.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         
-        # Machine ID Input
+        # Use simple VBox for GroupBox content
+        group_layout = QVBoxLayout(input_group)
+        group_layout.setContentsMargins(25, 40, 25, 25) # Increased top margin for title
+        group_layout.setSpacing(20) # Increased spacing between fields
+        
+        # Machine ID Field
+        lbl_mid = QLabel("Machine ID")
+        lbl_mid.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        lbl_mid.setStyleSheet("color: #AAA; margin-left: 2px;")
+        group_layout.addWidget(lbl_mid)
+
         self.machine_id_input = QLineEdit()
         self.machine_id_input.setPlaceholderText("Örn: A35C7B79-BFE9-BE24-2EBB-9160AAB960CC")
         self.machine_id_input.setFont(QFont("Consolas", 12))
-        self.machine_id_input.setMinimumHeight(40)
+        self.machine_id_input.setMinimumHeight(45)
         self.machine_id_input.setStyleSheet("""
             QLineEdit {
-                background-color: #2A2A2A;
+                background-color: #252525;
                 color: #00ADB5;
-                border: 2px solid #444;
-                border-radius: 5px;
-                padding: 8px 12px;
+                border: 1px solid #444;
+                border-radius: 6px;
+                padding: 0 15px;
             }
             QLineEdit:focus {
-                border-color: #00ADB5;
+                border: 1px solid #00ADB5;
+                background-color: #2A2A2A;
             }
         """)
-        input_layout.addRow("Machine ID:", self.machine_id_input)
+        group_layout.addWidget(self.machine_id_input)
         
-        # Customer Name (optional, for reference)
+        # Customer Name Field
+        lbl_name = QLabel("Müşteri Adı")
+        lbl_name.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        lbl_name.setStyleSheet("color: #AAA; margin-left: 2px;")
+        group_layout.addWidget(lbl_name)
+
         self.customer_name_input = QLineEdit()
         self.customer_name_input.setPlaceholderText("(İsteğe bağlı)")
         self.customer_name_input.setFont(QFont("Segoe UI", 11))
-        self.customer_name_input.setMinimumHeight(35)
+        self.customer_name_input.setMinimumHeight(45)
         self.customer_name_input.setStyleSheet("""
             QLineEdit {
-                background-color: #2A2A2A;
+                background-color: #252525;
                 color: #FFF;
                 border: 1px solid #444;
-                border-radius: 5px;
-                padding: 8px 12px;
+                border-radius: 6px;
+                padding: 0 15px;
             }
             QLineEdit:focus {
-                border-color: #00ADB5;
+                border: 1px solid #00ADB5;
+                background-color: #2A2A2A;
             }
         """)
-        input_layout.addRow("Müşteri Adı:", self.customer_name_input)
+        group_layout.addWidget(self.customer_name_input)
         
         layout.addWidget(input_group)
         
+        # --- Spacer ---
+        layout.addSpacing(10)
+        
         # --- Generate Button ---
-        self.generate_btn = QPushButton("🔐 LİSANS ANAHTARI OLUŞTUR")
+        self.generate_btn = QPushButton("🔐  LİSANS ANAHTARI OLUŞTUR")
         self.generate_btn.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-        self.generate_btn.setMinimumHeight(50)
+        self.generate_btn.setMinimumHeight(55)
         self.generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.generate_btn.clicked.connect(self._generate_license)
         self.generate_btn.setStyleSheet("""
@@ -130,63 +151,76 @@ class LicenseGeneratorWindow(QMainWindow):
                 background-color: #00ADB5;
                 color: white;
                 border: none;
-                border-radius: 6px;
-                padding: 12px;
+                border-radius: 8px;
+                font-weight: bold;
+                letter-spacing: 0.5px;
             }
             QPushButton:hover {
                 background-color: #00C4CC;
+                margin-top: -2px;
             }
             QPushButton:pressed {
                 background-color: #008B91;
+                margin-top: 2px;
             }
         """)
+        self.generate_btn.setGraphicsEffect(None) # Removing shadow for flat look
         layout.addWidget(self.generate_btn)
         
         # --- Result Section ---
         result_group = QGroupBox("Oluşturulan Lisans Anahtarı")
-        result_group.setFont(QFont("Segoe UI", 11))
+        result_group.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         result_layout = QVBoxLayout(result_group)
+        result_layout.setContentsMargins(20, 25, 20, 20)
+        result_layout.setSpacing(15)
         
         self.result_display = QLineEdit()
         self.result_display.setReadOnly(True)
-        self.result_display.setFont(QFont("Consolas", 18, QFont.Weight.Bold))
-        self.result_display.setMinimumHeight(55)
+        self.result_display.setFont(QFont("Consolas", 20, QFont.Weight.Bold))
+        self.result_display.setMinimumHeight(60)
         self.result_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.result_display.setPlaceholderText("XXXX - XXXX - XXXX - XXXX")
         self.result_display.setStyleSheet("""
             QLineEdit {
-                background-color: #1E1E1E;
-                color: #32CD32;
-                border: 2px solid #32CD32;
-                border-radius: 6px;
-                padding: 10px;
-                letter-spacing: 3px;
+                background-color: #1A1A1A;
+                color: #555;
+                border: 2px dashed #444;
+                border-radius: 8px;
+                padding: 5px;
+                letter-spacing: 4px;
             }
         """)
         result_layout.addWidget(self.result_display)
         
-        # Copy Button
+        # Copy Button Container for centering
+        copy_container = QHBoxLayout()
+        copy_container.addStretch()
+        
         self.copy_btn = QPushButton("📋 Panoya Kopyala")
-        self.copy_btn.setFont(QFont("Segoe UI", 10))
-        self.copy_btn.setMinimumHeight(35)
+        self.copy_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
+        self.copy_btn.setFixedSize(160, 40)
         self.copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.copy_btn.clicked.connect(self._copy_to_clipboard)
         self.copy_btn.setStyleSheet("""
             QPushButton {
-                background-color: #3A3A3A;
+                background-color: #333;
                 color: #DDD;
                 border: 1px solid #555;
-                border-radius: 5px;
-                padding: 8px 15px;
+                border-radius: 20px;
             }
             QPushButton:hover {
-                background-color: #4A4A4A;
-                border-color: #32CD32;
+                background-color: #444;
+                border-color: #00ADB5;
+                color: #FFF;
             }
             QPushButton:pressed {
-                background-color: #2A2A2A;
+                background-color: #222;
             }
         """)
-        result_layout.addWidget(self.copy_btn)
+        copy_container.addWidget(self.copy_btn)
+        copy_container.addStretch()
+        
+        result_layout.addLayout(copy_container)
         
         layout.addWidget(result_group)
         
@@ -194,7 +228,7 @@ class LicenseGeneratorWindow(QMainWindow):
         layout.addStretch()
         footer_label = QLabel("Copyright © 2025 Pikolab R&D Ltd. Co. All Rights Reserved.")
         footer_label.setFont(QFont("Segoe UI", 9))
-        footer_label.setStyleSheet("color: #666;")
+        footer_label.setStyleSheet("color: #555;")
         footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(footer_label)
     
@@ -250,12 +284,12 @@ class LicenseGeneratorWindow(QMainWindow):
         self.result_display.setText(license_key)
         self.result_display.setStyleSheet("""
             QLineEdit {
-                background-color: #1E1E1E;
+                background-color: #1A1A1A;
                 color: #32CD32;
                 border: 2px solid #32CD32;
-                border-radius: 6px;
-                padding: 10px;
-                letter-spacing: 3px;
+                border-radius: 8px;
+                padding: 5px;
+                letter-spacing: 4px;
             }
         """)
         
@@ -281,8 +315,7 @@ class LicenseGeneratorWindow(QMainWindow):
                 background-color: #32CD32;
                 color: white;
                 border: none;
-                border-radius: 5px;
-                padding: 8px 15px;
+                border-radius: 20px;
             }
         """)
         
