@@ -65,7 +65,7 @@ graph TD
 ### Component Details
 - **`desktop_app/ui/`**: Contains strict UI components (`main_window.py`, `license_dialog.py`).
 - **`desktop_app/workers/`**: Background threads for non-blocking operations (`live_worker.py` for Modbus, `analysis_worker.py` for heavy math).
-- **`backend/analysis.py`**: The synchronized math engine shared with the web version.
+- **`backend/analysis.py`**: The core math engine for signal analysis.
 - **`backend/license_manager.py`**: Handles SHA-256 fingerprinting and key verification.
 
 ---

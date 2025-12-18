@@ -20,33 +20,44 @@ class FileLoadWorker(QThread):
         try:
             logger.info(f"Starting background load for: {self.filepath}")
             
-            # --- CLOUD DRIVE FIX ---
-            # Pre-read the file in chunks to minimize huge timeouts and trigger cloud download
+            import os
             import time
             import io
             
-            raw_data = None
-            max_retries = 3
+            file_size_mb = os.path.getsize(self.filepath) / (1024 * 1024)
+            logger.info(f"File size: {file_size_mb:.2f} MB")
             
-            for attempt in range(max_retries):
-                try:
-                    with open(self.filepath, 'rb') as f:
-                        # Read into memory buffer
-                        # If file is huge (>500MB), this might be bad, but for <100MB it's fine
-                        # and ensures we have the data before Pandas touches it.
-                        raw_data = f.read() 
-                    break # Success
-                except OSError as e:
-                    if e.errno == 60: # ETIMEDOUT
-                        logger.warning(f"Timeout on attempt {attempt+1}. Retrying in 2s...")
-                        time.sleep(2.0)
-                    else:
-                        raise e
+            if file_size_mb > 500:
+                raise ValueError(f"Dosya çok büyük ({file_size_mb:.1f} MB). Maksimum limit 500 MB.")
             
-            if raw_data is None:
-                raise TimeoutError("Failed to download file from Cloud Storage after multiple attempts.")
+            # --- CLOUD DRIVE STRATEGY ---
+            # For small files (<50MB), we pre-read into RAM to prevent cloud timeouts.
+            # For large files (>50MB), we skip this to avoid OOM crashes (Double RAM usage).
+            
+            if file_size_mb < 50:
+                raw_data = None
+                max_retries = 3
                 
-            file_buffer = io.BytesIO(raw_data)
+                for attempt in range(max_retries):
+                    try:
+                        with open(self.filepath, 'rb') as f:
+                            raw_data = f.read() 
+                        break # Success
+                    except OSError as e:
+                        if e.errno == 60: # ETIMEDOUT
+                            logger.warning(f"Timeout on attempt {attempt+1}. Retrying in 2s...")
+                            time.sleep(2.0)
+                        else:
+                            raise e
+                
+                if raw_data is None:
+                    raise TimeoutError("Bulut depolamadan dosya indirilemedi.")
+                    
+                file_buffer = io.BytesIO(raw_data)
+            else:
+                # Direct pointer for large files
+                logger.info("Large file detected - skipping pre-buffer to save memory.")
+                file_buffer = self.filepath
             # -----------------------
 
             if self.filepath.endswith('.csv') or self.filepath.endswith('.txt'):
