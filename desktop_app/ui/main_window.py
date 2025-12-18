@@ -43,10 +43,11 @@ class ConnectionDialog(QDialog):
     SOURCE_TCP = "tcp"
     SOURCE_RTU = "rtu"
     
-    # Hamilton sensor defaults
+    # Hamilton VisiFerm sensor defaults (per VisiFerm Programmer's Manual)
+    # VisiFerm uses: 19200 baud, No Parity, 8 data bits, 2 stop bits
     HAMILTON_BAUD = 19200
-    HAMILTON_PARITY = "E"  # Even
-    HAMILTON_STOPBITS = 1
+    HAMILTON_PARITY = "N"  # None (VisiFerm default)
+    HAMILTON_STOPBITS = 2   # 2 stop bits when parity=None
     HAMILTON_BYTESIZE = 8
     
     def __init__(self, parent=None):
@@ -167,13 +168,13 @@ class ConnectionDialog(QDialog):
         # Parity ComboBox
         self.parity_combo = QComboBox()
         self.parity_combo.addItems(["None (N)", "Even (E)", "Odd (O)"])
-        self.parity_combo.setCurrentIndex(1)  # Even - Hamilton default
+        self.parity_combo.setCurrentIndex(0)  # None - Hamilton VisiFerm default
         rtu_layout.addRow("Parity:", self.parity_combo)
         
         # Stop Bits
         self.stopbits_combo = QComboBox()
         self.stopbits_combo.addItems(["1", "2"])
-        self.stopbits_combo.setCurrentText("1")  # Hamilton default
+        self.stopbits_combo.setCurrentText("2")  # Hamilton VisiFerm default (2 when parity=None)
         rtu_layout.addRow("Stop Bits:", self.stopbits_combo)
         
         # Register Address
@@ -196,7 +197,7 @@ class ConnectionDialog(QDialog):
         rtu_layout.addRow("Scale Factor:", self.rtu_scale_input)
         
         # Hamilton note
-        hamilton_note = QLabel("💡 Hamilton VisiWater/Arc: 19200, Even, 1 stop bit")
+        hamilton_note = QLabel("💡 Hamilton VisiFerm: 19200, None, 2 stop bits")
         hamilton_note.setStyleSheet("color: #888; font-style: italic; font-size: 11px;")
         rtu_layout.addRow("", hamilton_note)
         

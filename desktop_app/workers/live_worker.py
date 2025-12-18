@@ -139,7 +139,7 @@ class ModbusWorker(QThread):
                 parity=self.parity,
                 stopbits=self.stopbits,
                 bytesize=self.bytesize,
-                timeout=3.0
+                timeout=3.0,
             )
         else:
             raise ValueError(f"Unknown connection type: {self.connection_type}")
@@ -185,11 +185,29 @@ class ModbusWorker(QThread):
                 while self.is_running and self.client.connected:
                     try:
                         # Read 2 registers for Float32 (Big Endian)
-                        result = self.client.read_holding_registers(
-                            address=self.register_address,
-                            count=2,
-                            slave=self.slave_id
-                        )
+                        # pymodbus 3.10+ uses 'device_id' instead of 'slave'
+                        try:
+                            # pymodbus 3.10+
+                            result = self.client.read_holding_registers(
+                                address=self.register_address,
+                                count=2,
+                                device_id=self.slave_id
+                            )
+                        except TypeError:
+                            try:
+                                # pymodbus 3.0-3.9
+                                result = self.client.read_holding_registers(
+                                    address=self.register_address,
+                                    count=2,
+                                    slave=self.slave_id
+                                )
+                            except TypeError:
+                                # pymodbus 2.x fallback
+                                result = self.client.read_holding_registers(
+                                    self.register_address,
+                                    2,
+                                    unit=self.slave_id
+                                )
                         
                         if result.isError():
                             self.error_occurred.emit(f"Read error: {result}")
@@ -209,6 +227,11 @@ class ModbusWorker(QThread):
                         
                     except ModbusException as e:
                         self.error_occurred.emit(f"Modbus error: {e}")
+                        break
+                    except OSError as e:
+                        # Handle "Invalid handle" error - serial port lost
+                        logger.warning(f"Serial port error (will reconnect): {e}")
+                        self.error_occurred.emit(f"Serial port error: {e}")
                         break
                     except Exception as e:
                         self.error_occurred.emit(f"Read error: {e}")
