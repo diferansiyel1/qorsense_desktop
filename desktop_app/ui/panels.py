@@ -142,6 +142,8 @@ class AddSensorDialog(QDialog):
 class FieldExplorerPanel(QDockWidget):
     # Signal emitted when a sensor is selected (path as string)
     sensor_selected = pyqtSignal(str)
+    # Signal emitted when CSV loading is requested for a sensor
+    load_csv_requested = pyqtSignal(str)
     
     def __init__(self, parent=None):
         super().__init__("Field Explorer", parent)
@@ -191,6 +193,10 @@ class FieldExplorerPanel(QDockWidget):
         remove_action = QAction("Remove Item", self)
         remove_action.triggered.connect(lambda: self.remove_item(item))
         
+        # CSV Load action for sensors
+        load_csv_action = QAction("📂 Load CSV Data", self)
+        load_csv_action.triggered.connect(lambda: self._request_csv_load(item))
+        
         # Logic for menu items based on selection
         if item is None:
             menu.addAction(add_factory_action)
@@ -199,7 +205,7 @@ class FieldExplorerPanel(QDockWidget):
             # Determine hierarchy level
             # Level 0 = Factory/Root -> Can add Line
             # Level 1 = Line -> Can add Sensor
-            # Level 2 = Sensor -> Leaf (can't add children)
+            # Level 2 = Sensor -> Leaf (can load CSV data)
             
             level = 0
             curr = item
@@ -211,11 +217,19 @@ class FieldExplorerPanel(QDockWidget):
                  menu.addAction(add_line_action)
             elif level == 1: # Line level (can hold sensors)
                  menu.addAction(add_sensor_action)
+            elif level == 2: # Sensor level (leaf node)
+                 menu.addAction(load_csv_action)
             
             menu.addSeparator()
             menu.addAction(remove_action)
             
         menu.exec(self.tree.viewport().mapToGlobal(position))
+    
+    def _request_csv_load(self, item):
+        """Emit signal to request CSV loading for the selected sensor"""
+        if item:
+            path = self.get_item_path(item)
+            self.load_csv_requested.emit(path)
 
     def add_factory(self):
         name, ok = QInputDialog.getText(self, "Add Factory", "Factory Name:")

@@ -65,6 +65,176 @@ class OscilloscopeWidget(pg.PlotWidget):
         """Return copy of current buffer data for analysis."""
         return list(self.data_buffer)
 
+
+class MultiSensorOscilloscope(pg.PlotWidget):
+    """
+    Multi-sensor oscilloscope with separate traces for each sensor.
+    
+    Features:
+    - Unique color per sensor
+    - Legend with sensor names
+    - Independent data buffers per sensor
+    - Click to select sensor
+    
+    Example:
+        >>> scope = MultiSensorOscilloscope(max_points=300)
+        >>> scope.add_sensor("ph_sensor", "pH Sensor")
+        >>> scope.add_sensor("temperature", "Temperature")
+        >>> scope.update_sensor("ph_sensor", 7.12, time.time())
+    """
+    
+    # Predefined color palette for sensors
+    COLORS = [
+        '#00ffff',  # Cyan
+        '#ff6b6b',  # Red/Pink
+        '#4ecdc4',  # Teal
+        '#ffbe0b',  # Yellow
+        '#fb5607',  # Orange
+        '#a855f7',  # Purple
+        '#22c55e',  # Green
+        '#3b82f6',  # Blue
+    ]
+    
+    def __init__(self, parent=None, max_points: int = 300):
+        """
+        Initialize multi-sensor oscilloscope.
+        
+        Args:
+            parent: Parent widget
+            max_points: Maximum points per sensor buffer
+        """
+        super().__init__(parent=parent, title="Multi-Sensor Live Data")
+        self.setBackground('#1e1e1e')
+        self.showGrid(x=True, y=True, alpha=0.3)
+        self.setLabel('left', 'Value')
+        self.setLabel('bottom', 'Time', units='s')
+        
+        self.max_points = max_points
+        self.sensors: dict = {}  # {sensor_id: {curve, data, time, color, name}}
+        self._color_index = 0
+        
+        # Add legend
+        self.legend = self.addLegend(offset=(10, 10))
+        
+        # Enable mouse tracking for tooltips
+        self.setMouseEnabled(x=True, y=True)
+    
+    def add_sensor(self, sensor_id: str, display_name: str = None, color: str = None) -> None:
+        """
+        Add a new sensor trace to the graph.
+        
+        Args:
+            sensor_id: Unique sensor identifier
+            display_name: Name shown in legend (defaults to sensor_id)
+            color: Hex color code (auto-assigned if None)
+        """
+        if sensor_id in self.sensors:
+            return  # Already exists
+        
+        # Assign color
+        if color is None:
+            color = self.COLORS[self._color_index % len(self.COLORS)]
+            self._color_index += 1
+        
+        # Create curve
+        name = display_name or sensor_id
+        curve = self.plot(
+            [], [],
+            pen=pg.mkPen(color=color, width=2),
+            name=name
+        )
+        
+        # Store sensor info
+        self.sensors[sensor_id] = {
+            'curve': curve,
+            'data': [],
+            'time': [],
+            'color': color,
+            'name': name
+        }
+    
+    def update_sensor(self, sensor_id: str, value: float, timestamp: float = None) -> None:
+        """
+        Update a specific sensor's data.
+        
+        Args:
+            sensor_id: Sensor identifier
+            value: New data value
+            timestamp: Unix timestamp (uses monotonic if None)
+        """
+        if sensor_id not in self.sensors:
+            # Auto-add sensor if not exists
+            self.add_sensor(sensor_id)
+        
+        sensor = self.sensors[sensor_id]
+        
+        # Add to buffers
+        sensor['data'].append(value)
+        if timestamp is not None:
+            sensor['time'].append(timestamp)
+        else:
+            import time
+            sensor['time'].append(time.time())
+        
+        # Limit buffer size
+        if len(sensor['data']) > self.max_points:
+            sensor['data'] = sensor['data'][-self.max_points:]
+            sensor['time'] = sensor['time'][-self.max_points:]
+        
+        # Update curve with relative time
+        if sensor['time']:
+            t0 = sensor['time'][0]
+            rel_time = [t - t0 for t in sensor['time']]
+            sensor['curve'].setData(x=rel_time, y=sensor['data'])
+    
+    def remove_sensor(self, sensor_id: str) -> bool:
+        """
+        Remove sensor trace from graph.
+        
+        Args:
+            sensor_id: Sensor identifier
+            
+        Returns:
+            True if removed, False if not found
+        """
+        if sensor_id not in self.sensors:
+            return False
+        
+        sensor = self.sensors[sensor_id]
+        self.removeItem(sensor['curve'])
+        del self.sensors[sensor_id]
+        return True
+    
+    def clear_sensor(self, sensor_id: str) -> None:
+        """Clear data buffer for a specific sensor."""
+        if sensor_id in self.sensors:
+            sensor = self.sensors[sensor_id]
+            sensor['data'] = []
+            sensor['time'] = []
+            sensor['curve'].setData([], [])
+    
+    def clear_all(self) -> None:
+        """Clear all sensor data buffers."""
+        for sensor_id in self.sensors:
+            self.clear_sensor(sensor_id)
+    
+    def get_sensor_data(self, sensor_id: str) -> list:
+        """Get copy of sensor's data buffer."""
+        if sensor_id in self.sensors:
+            return list(self.sensors[sensor_id]['data'])
+        return []
+    
+    def get_all_sensor_ids(self) -> list:
+        """Get list of all sensor IDs."""
+        return list(self.sensors.keys())
+    
+    def set_sensor_visible(self, sensor_id: str, visible: bool) -> None:
+        """Show/hide a sensor trace."""
+        if sensor_id in self.sensors:
+            self.sensors[sensor_id]['curve'].setVisible(visible)
+
+
+
 class TrendWidget(pg.PlotWidget):
     def __init__(self, parent=None):
         super().__init__(parent=parent, title="DFA Trend Analysis & Residuals")

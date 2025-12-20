@@ -3,19 +3,21 @@ import os
 import logging
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QLabel, QFrame, QMessageBox, QProgressBar,
-                             QFileDialog, QInputDialog, QDialog, QDialogButtonBox,
-                             QRadioButton, QButtonGroup, QFormLayout, QLineEdit,
-                             QSpinBox, QDoubleSpinBox, QGroupBox, QStackedWidget,
-                             QComboBox)
+                             QStackedWidget, QSpinBox, QLineEdit, QComboBox, QRadioButton,
+                             QGroupBox, QFormLayout, QButtonGroup, QDialogButtonBox, QDialog,
+                             QDoubleSpinBox, QFileDialog, QInputDialog)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QAction, QFont
 import numpy as np
-from PyQt6.QtCore import Qt, QTimer
 from datetime import datetime
 import pandas as pd
 
 # Import modular UI components
-from desktop_app.ui.charts import AnalysisDashboard
+from desktop_app.ui.charts import AnalysisDashboard, MultiSensorOscilloscope
 from desktop_app.ui.panels import FieldExplorerPanel, AlarmPanel
 from desktop_app.ui.results_panel import ResultsPanel
+from desktop_app.ui.sensor_status_panel import SensorStatusPanel
+from desktop_app.ui.multi_sensor_dialog import MultiSensorConnectionDialog
 from desktop_app.core.analyzer_bridge import AnalyzerBridge
 from desktop_app.workers.analysis_worker import AnalysisWorker
 from desktop_app.workers.file_loader import FileLoadWorker
@@ -183,6 +185,26 @@ class ConnectionDialog(QDialog):
         self.rtu_register_input.setValue(0)
         rtu_layout.addRow("Register Address:", self.rtu_register_input)
         
+        # Register Count
+        self.rtu_register_count_input = QSpinBox()
+        self.rtu_register_count_input.setRange(1, 125)
+        self.rtu_register_count_input.setValue(2)
+        self.rtu_register_count_input.setToolTip("Number of registers to read (Visiferm: 10)")
+        rtu_layout.addRow("Register Count:", self.rtu_register_count_input)
+        
+        # Value Register Offset
+        self.rtu_value_offset_input = QSpinBox()
+        self.rtu_value_offset_input.setRange(0, 123)
+        self.rtu_value_offset_input.setValue(0)
+        self.rtu_value_offset_input.setToolTip("Offset within response where value starts (Visiferm: 2)")
+        rtu_layout.addRow("Value Offset:", self.rtu_value_offset_input)
+        
+        # Data Type
+        self.rtu_datatype_combo = QComboBox()
+        self.rtu_datatype_combo.addItems(["float32_be", "float32_le", "float32_ws", "float32_bs", "int16", "uint16"])
+        self.rtu_datatype_combo.setCurrentText("float32_ws")  # Visiferm uses word-swapped
+        rtu_layout.addRow("Data Type:", self.rtu_datatype_combo)
+        
         # Slave ID
         self.rtu_slave_input = QSpinBox()
         self.rtu_slave_input.setRange(1, 247)
@@ -196,10 +218,17 @@ class ConnectionDialog(QDialog):
         self.rtu_scale_input.setDecimals(4)
         rtu_layout.addRow("Scale Factor:", self.rtu_scale_input)
         
-        # Hamilton note
-        hamilton_note = QLabel("💡 Hamilton VisiFerm: 19200, None, 2 stop bits")
-        hamilton_note.setStyleSheet("color: #888; font-style: italic; font-size: 11px;")
-        rtu_layout.addRow("", hamilton_note)
+        # Visiferm Preset Buttons
+        preset_layout = QHBoxLayout()
+        btn_o2 = QPushButton("📍 Visiferm O2")
+        btn_o2.setToolTip("Hamilton Visiferm PMC1 (Oxygen)")
+        btn_o2.clicked.connect(self._apply_visiferm_o2_preset)
+        btn_temp = QPushButton("📍 Visiferm Temp")
+        btn_temp.setToolTip("Hamilton Visiferm PMC6 (Temperature)")
+        btn_temp.clicked.connect(self._apply_visiferm_temp_preset)
+        preset_layout.addWidget(btn_o2)
+        preset_layout.addWidget(btn_temp)
+        rtu_layout.addRow("Preset:", preset_layout)
         
         self.settings_stack.addWidget(rtu_page)
         
@@ -286,6 +315,9 @@ class ConnectionDialog(QDialog):
             "stopbits": int(self.stopbits_combo.currentText()),
             "bytesize": 8,  # Fixed at 8 for Modbus RTU
             "register_address": self.rtu_register_input.value(),
+            "register_count": self.rtu_register_count_input.value(),
+            "value_register_offset": self.rtu_value_offset_input.value(),
+            "data_type": self.rtu_datatype_combo.currentText(),
             "slave_id": self.rtu_slave_input.value(),
             "scale_factor": self.rtu_scale_input.value()
         }
@@ -297,6 +329,30 @@ class ConnectionDialog(QDialog):
         elif self.radio_rtu.isChecked():
             return self.get_rtu_config()
         return {}
+    
+    def _apply_visiferm_o2_preset(self):
+        """Apply Hamilton Visiferm PMC1 (Oxygen) preset settings."""
+        self.baud_combo.setCurrentText("19200")
+        self.parity_combo.setCurrentIndex(0)  # None
+        self.stopbits_combo.setCurrentText("2")
+        self.rtu_register_input.setValue(2089)
+        self.rtu_register_count_input.setValue(10)
+        self.rtu_value_offset_input.setValue(2)
+        self.rtu_datatype_combo.setCurrentText("float32_ws")
+        self.rtu_slave_input.setValue(2)
+        self.rtu_scale_input.setValue(1.0)
+    
+    def _apply_visiferm_temp_preset(self):
+        """Apply Hamilton Visiferm PMC6 (Temperature) preset settings."""
+        self.baud_combo.setCurrentText("19200")
+        self.parity_combo.setCurrentIndex(0)  # None
+        self.stopbits_combo.setCurrentText("2")
+        self.rtu_register_input.setValue(2409)
+        self.rtu_register_count_input.setValue(10)
+        self.rtu_value_offset_input.setValue(2)
+        self.rtu_datatype_combo.setCurrentText("float32_ws")
+        self.rtu_slave_input.setValue(2)
+        self.rtu_scale_input.setValue(1.0)
 
 
 class QorSenseMainWindow(QMainWindow):
@@ -332,6 +388,7 @@ class QorSenseMainWindow(QMainWindow):
         self.live_sample_count = 0  # Counter for triggering analysis
         self.ANALYSIS_TRIGGER_COUNT = 60  # Trigger analysis every 60 samples (1 minute at 1Hz)
         self.is_live_mode = False  # Flag for live monitoring mode
+        self._selected_live_sensor = None  # Currently selected sensor for analysis
         
         # --- UI SETUP ---
         self.setup_ui()
@@ -339,6 +396,9 @@ class QorSenseMainWindow(QMainWindow):
     def setup_ui(self):
         # 1. Central Dashboard
         self.dashboard = AnalysisDashboard() # Charts
+        
+        # Multi-sensor oscilloscope for live data
+        self.multi_oscilloscope = MultiSensorOscilloscope(max_points=300)
         
         # 2. Control Stripe (Top)
         control_panel = self.create_control_panel()
@@ -366,7 +426,14 @@ class QorSenseMainWindow(QMainWindow):
         # 3. Docks
         self.panel_explorer = FieldExplorerPanel(self)
         self.panel_explorer.sensor_selected.connect(self.on_sensor_selected)
+        self.panel_explorer.load_csv_requested.connect(self.on_csv_load_requested)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.panel_explorer)
+        
+        # Sensor Status Panel (for multi-sensor monitoring)
+        self.sensor_status_panel = SensorStatusPanel(self)
+        self.sensor_status_panel.sensor_selected.connect(self._on_live_sensor_selected)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.sensor_status_panel)
+        self.sensor_status_panel.setVisible(False)  # Hidden until live mode
         
         self.panel_alarms = AlarmPanel(self)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.panel_alarms)
@@ -446,7 +513,24 @@ class QorSenseMainWindow(QMainWindow):
         self.lbl_system_status = QLabel("SYSTEM: ONLINE")
         self.lbl_system_status.setStyleSheet("color: #32c850; font-weight: bold;")
         
+        # Multi-Sensor Connection Button
+        self.btn_multi_sensor = QPushButton("📊 Multi-Sensor")
+        self.btn_multi_sensor.setMinimumHeight(40)
+        self.btn_multi_sensor.setStyleSheet("""
+            QPushButton { 
+                background-color: #7c3aed; 
+                color: white; 
+                font-weight: bold; 
+                border-radius: 4px;
+                padding: 0 15px;
+            }
+            QPushButton:hover { background-color: #8b5cf6; }
+            QPushButton:pressed { background-color: #6d28d9; }
+        """)
+        self.btn_multi_sensor.clicked.connect(self.show_multi_sensor_dialog)
+        
         layout.addWidget(self.btn_connect)
+        layout.addWidget(self.btn_multi_sensor)
         layout.addWidget(self.btn_stop_live)
         layout.addWidget(self.btn_analyze)
         layout.addStretch()
@@ -569,6 +653,22 @@ class QorSenseMainWindow(QMainWindow):
             
         except Exception as e:
              self.on_load_error(str(e))
+    
+    def on_csv_load_requested(self, sensor_path):
+        """Handle CSV load request from Field Explorer context menu"""
+        # First, select the sensor
+        self.current_sensor_path = sensor_path
+        self.status_label.setText(f"Selected: {sensor_path}")
+        
+        # Then open file dialog for CSV loading
+        fname, _ = QFileDialog.getOpenFileName(
+            self, 
+            f"Load CSV Data for {os.path.basename(sensor_path)}", 
+            "", 
+            "Data Files (*.csv *.xlsx *.txt);;All Files (*)"
+        )
+        if fname:
+            self.load_file(fname)
     
     def on_sensor_selected(self, sensor_path):
         """Handle sensor selection from Field Explorer"""
@@ -785,18 +885,39 @@ class QorSenseMainWindow(QMainWindow):
                 read_interval=1.0
             )
         else:  # RTU
-            self.modbus_worker = ModbusWorker(
-                connection_type="RTU",
+            # Import SensorConfig from workers.models for proper configuration
+            from desktop_app.workers.models import SensorConfig as WorkerSensorConfig, ConnectionType, DataType
+            
+            # Map data_type string to DataType enum
+            data_type_map = {
+                "float32_be": DataType.FLOAT32_BE,
+                "float32_le": DataType.FLOAT32_LE,
+                "float32_ws": DataType.FLOAT32_WS,
+                "float32_bs": DataType.FLOAT32_BS,
+                "int16": DataType.INT16,
+                "uint16": DataType.UINT16,
+            }
+            data_type = data_type_map.get(config.get("data_type", "float32_ws"), DataType.FLOAT32_WS)
+            
+            # Create SensorConfig with all parameters
+            sensor_config = WorkerSensorConfig(
+                name="modbus_sensor",
+                connection_type=ConnectionType.RTU,
                 serial_port=config.get("serial_port", "COM1"),
                 baudrate=config.get("baudrate", 19200),
-                parity=config.get("parity", "E"),
-                stopbits=config.get("stopbits", 1),
+                parity=config.get("parity", "N"),
+                stopbits=config.get("stopbits", 2),
                 bytesize=config.get("bytesize", 8),
-                register_address=config.get("register_address", 0),
                 slave_id=config.get("slave_id", 1),
+                register_address=config.get("register_address", 0),
+                register_count=config.get("register_count", 2),
+                data_type=data_type,
                 scale_factor=config.get("scale_factor", 1.0),
-                read_interval=1.0
+                value_register_offset=config.get("value_register_offset", 0),
+                poll_interval=1.0
             )
+            
+            self.modbus_worker = ModbusWorker(sensors=[sensor_config])
         
         # Connect signals
         self.modbus_worker.data_received.connect(self._on_modbus_data_received)
@@ -829,10 +950,22 @@ class QorSenseMainWindow(QMainWindow):
         
         # Reset state
         self.is_live_mode = False
+        self._selected_live_sensor = None
+        
+        # Clear multi-sensor components
+        self.multi_oscilloscope.clear_all()
+        for sensor_id in list(self.multi_oscilloscope.sensors.keys()):
+            self.multi_oscilloscope.remove_sensor(sensor_id)
+        self.sensor_status_panel.clear_all()
+        self.sensor_status_panel.setVisible(False)
+        
+        # Restore original oscilloscope in dashboard
+        self.dashboard.splitter.replaceWidget(0, self.dashboard.oscilloscope)
         
         # Update UI
         self.btn_stop_live.setVisible(False)
         self.btn_connect.setEnabled(True)
+        self.btn_multi_sensor.setEnabled(True)
         self.lbl_live_status.setVisible(False)
         self.status_label.setText("Live monitoring stopped")
         
@@ -912,3 +1045,146 @@ class QorSenseMainWindow(QMainWindow):
             "ModbusWorker",
             f"Connection: {status}"
         )
+    
+    # =========================================================================
+    # MULTI-SENSOR MONITORING
+    # =========================================================================
+    
+    def show_multi_sensor_dialog(self):
+        """Show multi-sensor connection configuration dialog."""
+        dialog = MultiSensorConnectionDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            connection_type = dialog.get_connection_type()
+            connection_params = dialog.get_connection_params()
+            sensors = dialog.get_sensors()
+            
+            self.start_multi_sensor_monitoring(connection_type, connection_params, sensors)
+    
+    def start_multi_sensor_monitoring(self, connection_type: str, connection_params: dict, sensors: list):
+        """
+        Start monitoring multiple sensors.
+        
+        Args:
+            connection_type: 'TCP' or 'RTU'
+            connection_params: Connection parameters (ip/port or serial params)
+            sensors: List of sensor configurations
+        """
+        from desktop_app.workers.models import SensorConfig as WorkerSensorConfig, DataType, ConnectionType
+        
+        # Stop any existing monitoring
+        self.stop_live_monitoring()
+        
+        # Create SensorConfig objects for each sensor
+        sensor_configs = []
+        for sensor in sensors:
+            # Map data type string to enum
+            data_type_map = {
+                "FLOAT32_BE": DataType.FLOAT32_BE,
+                "FLOAT32_LE": DataType.FLOAT32_LE,
+                "FLOAT32_BS": DataType.FLOAT32_BS,
+                "FLOAT32_WS": DataType.FLOAT32_WS,
+                "INT16": DataType.INT16,
+                "UINT16": DataType.UINT16,
+                "INT32_BE": DataType.INT32_BE,
+                "UINT32_BE": DataType.UINT32_BE,
+            }
+            
+            config_dict = {
+                "name": sensor["name"],
+                "register_address": sensor["register_address"],
+                "data_type": data_type_map.get(sensor["data_type"], DataType.FLOAT32_BE),
+                "scale_factor": sensor["scale_factor"],
+                "slave_id": sensor.get("slave_id", 1),
+            }
+            
+            if connection_type == "TCP":
+                config_dict["connection_type"] = ConnectionType.TCP
+                config_dict["ip"] = connection_params.get("ip_address", "127.0.0.1")
+                config_dict["port"] = connection_params.get("tcp_port", 502)
+            else:
+                config_dict["connection_type"] = ConnectionType.RTU
+                config_dict["serial_port"] = connection_params.get("serial_port", "COM1")
+                config_dict["baudrate"] = connection_params.get("baudrate", 19200)
+                config_dict["parity"] = connection_params.get("parity", "N")
+                config_dict["stopbits"] = connection_params.get("stopbits", 1)
+                config_dict["bytesize"] = connection_params.get("bytesize", 8)
+            
+            sensor_configs.append(WorkerSensorConfig(**config_dict))
+        
+        # Add sensors to UI components
+        for sensor in sensors:
+            self.multi_oscilloscope.add_sensor(sensor["name"], sensor["name"])
+            self.sensor_status_panel.add_sensor(sensor["name"], sensor["name"])
+        
+        # Create and start ModbusWorker with multiple sensors
+        self.modbus_worker = ModbusWorker(sensors=sensor_configs)
+        
+        # Connect signals
+        self.modbus_worker.sensor_data_received.connect(self._on_multi_sensor_data)
+        self.modbus_worker.error_occurred.connect(self._on_modbus_error)
+        self.modbus_worker.connection_status.connect(self._on_modbus_connection_status)
+        self.modbus_worker.device_status_changed.connect(self._on_device_status_changed)
+        
+        # Start monitoring
+        self.modbus_worker.start()
+        
+        # Update UI
+        self.is_live_mode = True
+        self.btn_stop_live.setVisible(True)
+        self.btn_connect.setEnabled(False)
+        self.btn_multi_sensor.setEnabled(False)
+        self.sensor_status_panel.setVisible(True)
+        
+        # Switch to multi-sensor oscilloscope in dashboard
+        self.dashboard.splitter.replaceWidget(0, self.multi_oscilloscope)
+        
+        sensor_count = len(sensors)
+        conn_str = f"{connection_type}: {sensor_count} sensor(s)"
+        self.lbl_live_status.setText(f"● LIVE ({conn_str})")
+        self.lbl_live_status.setVisible(True)
+        self.status_label.setText(f"Monitoring {sensor_count} sensors...")
+        
+        self.panel_alarms.add_alarm(
+            datetime.now().strftime("%H:%M:%S"),
+            "INFO",
+            "MultiSensor",
+            f"Started monitoring {sensor_count} sensors via {connection_type}"
+        )
+    
+    def _on_multi_sensor_data(self, sensor_id: str, value: float, timestamp: float):
+        """Handle data received from multi-sensor worker."""
+        # Update oscilloscope
+        self.multi_oscilloscope.update_sensor(sensor_id, value, timestamp)
+        
+        # Update status panel
+        self.sensor_status_panel.update_sensor(sensor_id, value=value, status="online")
+        
+        # Buffer data for selected sensor (for analysis)
+        if self._selected_live_sensor == sensor_id:
+            self.live_data_buffer.append(value)
+            self.live_sample_count += 1
+            
+            # Trigger analysis periodically
+            if self.live_sample_count >= self.ANALYSIS_TRIGGER_COUNT:
+                self.live_sample_count = 0
+                self._trigger_live_analysis()
+    
+    def _on_device_status_changed(self, sensor_id: str, status: str):
+        """Handle device status changes from worker."""
+        status_text = status.lower()
+        self.sensor_status_panel.set_sensor_status(sensor_id, status_text)
+    
+    def _on_live_sensor_selected(self, sensor_id: str):
+        """Handle sensor selection from status panel."""
+        self._selected_live_sensor = sensor_id
+        self.live_data_buffer = list(self.multi_oscilloscope.get_sensor_data(sensor_id))
+        self.live_sample_count = 0
+        
+        self.status_label.setText(f"Selected: {sensor_id}")
+        self.panel_alarms.add_alarm(
+            datetime.now().strftime("%H:%M:%S"),
+            "INFO",
+            "SensorSelect",
+            f"Switched analysis target to: {sensor_id}"
+        )
+
