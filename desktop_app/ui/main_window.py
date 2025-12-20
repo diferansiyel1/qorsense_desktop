@@ -1092,7 +1092,9 @@ class QorSenseMainWindow(QMainWindow):
             config_dict = {
                 "name": sensor["name"],
                 "register_address": sensor["register_address"],
-                "data_type": data_type_map.get(sensor["data_type"], DataType.FLOAT32_BE),
+                "register_count": sensor.get("register_count", 10),
+                "value_register_offset": sensor.get("value_register_offset", 2),
+                "data_type": data_type_map.get(sensor["data_type"], DataType.FLOAT32_WS),
                 "scale_factor": sensor["scale_factor"],
                 "slave_id": sensor.get("slave_id", 1),
             }
@@ -1150,6 +1152,20 @@ class QorSenseMainWindow(QMainWindow):
             "MultiSensor",
             f"Started monitoring {sensor_count} sensors via {connection_type}"
         )
+        
+        # Auto-select first sensor for analysis
+        if sensors:
+            first_sensor_name = sensors[0]["name"]
+            self._selected_live_sensor = first_sensor_name
+            self.live_data_buffer = []
+            self.live_sample_count = 0
+            self.status_label.setText(f"Monitoring {sensor_count} sensors | Analysis: {first_sensor_name}")
+            self.panel_alarms.add_alarm(
+                datetime.now().strftime("%H:%M:%S"),
+                "INFO",
+                "AutoSelect",
+                f"Auto-selected '{first_sensor_name}' for analysis. Click another sensor in status panel to change."
+            )
     
     def _on_multi_sensor_data(self, sensor_id: str, value: float, timestamp: float):
         """Handle data received from multi-sensor worker."""

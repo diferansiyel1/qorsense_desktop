@@ -255,7 +255,8 @@ class SensorConfig(BaseModel):
         if self.connection_type == ConnectionType.TCP:
             return f"tcp://{self.ip}:{self.port}"
         else:
-            return f"rtu://{self.serial_port}@{self.baudrate}"
+            # Include all serial parameters to ensure unique connections
+            return f"rtu://{self.serial_port}@{self.baudrate}-{self.parity}{self.bytesize}{self.stopbits}"
 
     def get_display_name(self) -> str:
         """

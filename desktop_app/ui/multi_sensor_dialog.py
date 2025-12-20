@@ -137,16 +137,19 @@ class MultiSensorConnectionDialog(QDialog):
         sensor_layout = QVBoxLayout(sensor_group)
         
         # Table
-        self.sensor_table = QTableWidget(0, 5)
+        self.sensor_table = QTableWidget(0, 8)
         self.sensor_table.setHorizontalHeaderLabels([
-            "Name", "Register", "Data Type", "Scale", ""
+            "Name", "Slave ID", "Register", "Reg Count", "Offset", "Data Type", "Scale", ""
         ])
         self.sensor_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.sensor_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.sensor_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.sensor_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.sensor_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self.sensor_table.setColumnWidth(4, 60)
+        self.sensor_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.sensor_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self.sensor_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        self.sensor_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        self.sensor_table.setColumnWidth(7, 60)
         self.sensor_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.sensor_table.setAlternatingRowColors(True)
         sensor_layout.addWidget(self.sensor_table)
@@ -192,30 +195,52 @@ class MultiSensorConnectionDialog(QDialog):
         name_item = QTableWidgetItem(f"Sensor_{row+1}")
         self.sensor_table.setItem(row, 0, name_item)
         
+        # Slave ID (Unit ID)
+        slave_spin = QSpinBox()
+        slave_spin.setRange(1, 247)  # Modbus slave ID range: 1-247
+        slave_spin.setValue(1)  # Default slave ID
+        slave_spin.setToolTip("Modbus Slave/Unit ID (1-247)")
+        self.sensor_table.setCellWidget(row, 1, slave_spin)
+        
         # Register Address
         reg_spin = QSpinBox()
         reg_spin.setRange(0, 65535)
-        reg_spin.setValue(row * 2)  # Default: 0, 2, 4...
-        self.sensor_table.setCellWidget(row, 1, reg_spin)
+        reg_spin.setValue(2089)  # Default: Hamilton/EasyFerm PMC1 register
+        reg_spin.setToolTip("Starting register address")
+        self.sensor_table.setCellWidget(row, 2, reg_spin)
+        
+        # Register Count
+        count_spin = QSpinBox()
+        count_spin.setRange(1, 125)
+        count_spin.setValue(10)  # Default: Hamilton sensors read 10 registers
+        count_spin.setToolTip("Number of registers to read (Hamilton: 10)")
+        self.sensor_table.setCellWidget(row, 3, count_spin)
+        
+        # Value Offset
+        offset_spin = QSpinBox()
+        offset_spin.setRange(0, 20)
+        offset_spin.setValue(2)  # Default: Hamilton value starts at offset 2
+        offset_spin.setToolTip("Register offset where value starts (Hamilton: 2)")
+        self.sensor_table.setCellWidget(row, 4, offset_spin)
         
         # Data Type
         type_combo = QComboBox()
         type_combo.addItems(self.DATA_TYPES)
-        type_combo.setCurrentText("FLOAT32_BE")
-        self.sensor_table.setCellWidget(row, 2, type_combo)
+        type_combo.setCurrentText("FLOAT32_WS")  # Default: Hamilton uses Word Swapped
+        self.sensor_table.setCellWidget(row, 5, type_combo)
         
         # Scale Factor
         scale_spin = QDoubleSpinBox()
         scale_spin.setRange(0.0001, 10000)
         scale_spin.setValue(1.0)
         scale_spin.setDecimals(4)
-        self.sensor_table.setCellWidget(row, 3, scale_spin)
+        self.sensor_table.setCellWidget(row, 6, scale_spin)
         
         # Remove Button
         btn_remove = QPushButton("✖")
         btn_remove.setFixedWidth(40)
         btn_remove.clicked.connect(lambda: self._remove_sensor_row(row))
-        self.sensor_table.setCellWidget(row, 4, btn_remove)
+        self.sensor_table.setCellWidget(row, 7, btn_remove)
     
     def _remove_sensor_row(self, row: int):
         """Remove sensor row."""
@@ -225,7 +250,7 @@ class MultiSensorConnectionDialog(QDialog):
         self.sensor_table.removeRow(row)
         # Update remove button connections
         for r in range(self.sensor_table.rowCount()):
-            btn = self.sensor_table.cellWidget(r, 4)
+            btn = self.sensor_table.cellWidget(r, 7)
             if btn:
                 btn.clicked.disconnect()
                 btn.clicked.connect(lambda checked, row=r: self._remove_sensor_row(row))
@@ -283,15 +308,20 @@ class MultiSensorConnectionDialog(QDialog):
         sensors = []
         for row in range(self.sensor_table.rowCount()):
             name_item = self.sensor_table.item(row, 0)
-            reg_widget = self.sensor_table.cellWidget(row, 1)
-            type_widget = self.sensor_table.cellWidget(row, 2)
-            scale_widget = self.sensor_table.cellWidget(row, 3)
+            slave_widget = self.sensor_table.cellWidget(row, 1)
+            reg_widget = self.sensor_table.cellWidget(row, 2)
+            count_widget = self.sensor_table.cellWidget(row, 3)
+            offset_widget = self.sensor_table.cellWidget(row, 4)
+            type_widget = self.sensor_table.cellWidget(row, 5)
+            scale_widget = self.sensor_table.cellWidget(row, 6)
             
             sensors.append({
                 "name": name_item.text().strip() if name_item else f"Sensor_{row+1}",
+                "slave_id": slave_widget.value() if slave_widget else 1,
                 "register_address": reg_widget.value() if reg_widget else 0,
-                "data_type": type_widget.currentText() if type_widget else "FLOAT32_BE",
-                "scale_factor": scale_widget.value() if scale_widget else 1.0,
-                "slave_id": 1  # Default slave ID
+                "register_count": count_widget.value() if count_widget else 10,
+                "value_register_offset": offset_widget.value() if offset_widget else 2,
+                "data_type": type_widget.currentText() if type_widget else "FLOAT32_WS",
+                "scale_factor": scale_widget.value() if scale_widget else 1.0
             })
         return sensors
