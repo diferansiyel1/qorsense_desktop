@@ -4,11 +4,9 @@ Rate Limiting Middleware
 Implements request rate limiting to prevent abuse.
 """
 
+from backend.core.config import settings
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-from backend.core.config import settings
-
 
 # Create limiter instance
 limiter = Limiter(

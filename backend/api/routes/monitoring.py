@@ -4,10 +4,10 @@ Monitoring Routes
 Exposes application metrics and advanced health checks.
 """
 
+from backend.core.cache import get_redis
+from backend.core.metrics import get_metrics
 from fastapi import APIRouter
 from fastapi.responses import Response
-from backend.core.metrics import get_metrics
-from backend.core.cache import get_redis
 
 router = APIRouter(prefix="/monitoring", tags=["Monitoring"])
 
@@ -27,7 +27,7 @@ async def redis_health():
     redis = await get_redis()
     if not redis:
         return {"status": "down", "details": "Redis not connected"}
-    
+
     try:
         await redis.ping()
         return {"status": "up", "details": "Redis connected"}

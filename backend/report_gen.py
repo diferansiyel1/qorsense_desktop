@@ -1,22 +1,21 @@
 import os
 import tempfile
 import uuid
-import numpy as np
 from datetime import datetime
+
+import numpy as np
+import plotly.graph_objects as go
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, KeepTogether, PageBreak
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
 
 # --- Chart Generator Class ---
 class ChartGenerator:
     """Generates technical analysis charts using Plotly."""
-    
+
     @staticmethod
     def generate_all_charts(data: list, metrics: dict) -> dict:
         """
@@ -27,37 +26,37 @@ class ChartGenerator:
         try:
             # 1. Trend Analysis Diagram
             paths['trend'] = ChartGenerator._create_trend_chart(data, metrics.get("slope", 0))
-            
+
             # 2. Hysteresis Loop (Phase Plot)
             hyst_x = metrics.get("hysteresis_x")
             hyst_y = metrics.get("hysteresis_y")
             if hyst_x and hyst_y:
                 paths['hysteresis'] = ChartGenerator._create_hysteresis_chart(hyst_x, hyst_y, metrics.get("hysteresis", 0))
-            
+
             # 3. DFA Log-Log Plot
             scales = metrics.get("dfa_scales")
             flucts = metrics.get("dfa_fluctuations")
             if scales and flucts:
                 paths['dfa'] = ChartGenerator._create_dfa_chart(scales, flucts, metrics.get("hurst", 0.5))
-                
+
             # 4. Radar Chart
             paths['radar'] = ChartGenerator._create_radar_chart(metrics)
-                
+
         except Exception as e:
             print(f"Chart generation error: {e}")
-            
+
         return paths
 
     @staticmethod
     def _create_trend_chart(data, slope):
         fig = go.Figure()
-        fig.add_trace(go.Scatter(y=data, mode='lines', name='Sensor Signal', 
+        fig.add_trace(go.Scatter(y=data, mode='lines', name='Sensor Signal',
                                line=dict(color='#7F007F', width=1.5))) # Logo Purple
-        
+
         x = np.arange(len(data))
         trend = np.poly1d(np.polyfit(x, data, 1))(x)
-        fig.add_trace(go.Scatter(x=x, y=trend, mode='lines', name=f'Trend (m={slope:.4f})', 
-                               line=dict(color='#EF4444', width=2, dash='dash'))) 
+        fig.add_trace(go.Scatter(x=x, y=trend, mode='lines', name=f'Trend (m={slope:.4f})',
+                               line=dict(color='#EF4444', width=2, dash='dash')))
 
         fig.update_layout(
             title="Signal Trend & Drift Analysis",
@@ -75,8 +74,8 @@ class ChartGenerator:
         fig = go.Figure()
         # Scatter Plot: Logo Purple
         fig.add_trace(go.Scatter(x=x_data, y=y_data, mode='markers', name='Hysteresis Loop',
-                               marker=dict(color='#7F007F', size=4, opacity=0.6))) 
-        
+                               marker=dict(color='#7F007F', size=4, opacity=0.6)))
+
         fig.update_layout(
             title=f"Hysteresis Phase Plot (Area={area:.4f})",
             xaxis_title="Input Signal (t)",
@@ -92,15 +91,15 @@ class ChartGenerator:
     def _create_dfa_chart(scales, flucts, hurst):
         log_scales = np.log10(scales)
         log_flucts = np.log10(flucts)
-        
+
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=log_scales, y=log_flucts, mode='markers', name='DFA Points',
                                marker=dict(color='#F59E0B', size=8))) # Orange for contrast
-        
+
         fit = np.poly1d(np.polyfit(log_scales, log_flucts, 1))(log_scales)
         fig.add_trace(go.Scatter(x=log_scales, y=fit, mode='lines', name=f'Fit (H={hurst:.2f})',
                                line=dict(color='#36246D', width=2))) # Deep Brand Purple
-        
+
         fig.update_layout(
             title="DFA Fractal Analysis (Log-Log)",
             xaxis_title="Log(Scale)",
@@ -129,11 +128,11 @@ class ChartGenerator:
             norm(slope, 0.1),
             norm(noise, 1.5),
             norm(hyst, 0.5),
-            norm(hurst_dev, 0.3) 
+            norm(hurst_dev, 0.3)
         ]
-        
+
         categories = ['Bias', 'Slope', 'Noise', 'Hysteresis', 'DFA Dev']
-        
+
         fig = go.Figure()
 
         # Risk Polygon
@@ -145,7 +144,7 @@ class ChartGenerator:
             line=dict(color='#7F007F', width=2),
             name='Risk Profile'
         ))
-        
+
         # Limit Line (100)
         fig.add_trace(go.Scatterpolar(
             r=[100]*5,
@@ -168,11 +167,11 @@ class ChartGenerator:
             showlegend=False
         )
         return ChartGenerator._save_fig(fig, "radar")
-    
+
     @staticmethod
     def _save_fig(fig, prefix):
         temp = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{prefix}.png")
-        fig.write_image(temp.name, scale=2) 
+        fig.write_image(temp.name, scale=2)
         return temp.name
 
 
@@ -188,13 +187,13 @@ class QorSenseReportGenerator:
         self.styles = getSampleStyleSheet()
         self._create_custom_styles()
         self.report_id = str(uuid.uuid4()).split('-')[0].upper()
-        
+
     def _create_custom_styles(self):
         self.brand_primary = colors.HexColor('#7F007F') # Logo Purple
         self.brand_dark = colors.HexColor('#36246D') # Logo Deep Blue/Purple
         self.dark_gray = colors.HexColor('#222831')
         self.light_gray = colors.HexColor('#f3f4f6')
-        
+
         self.styles.add(ParagraphStyle(
             name='SectionHeader',
             fontSize=14,
@@ -225,7 +224,7 @@ class QorSenseReportGenerator:
         canvas.setFont('Helvetica-Bold', 14)
         canvas.setFillColor(self.dark_gray)
         canvas.drawRightString(195*mm, 280*mm, "Predictive Maintenance Certificate of Analysis")
-        
+
         canvas.setFont('Helvetica', 8)
         canvas.setFillColor(colors.gray)
         date_str = datetime.now().strftime("%d %b %Y")
@@ -239,20 +238,20 @@ class QorSenseReportGenerator:
         canvas.setLineWidth(0.5)
         canvas.setStrokeColor(colors.lightgrey)
         canvas.line(15*mm, 15*mm, 195*mm, 15*mm)
-        
+
         canvas.setFont('Helvetica-Oblique', 8)
         canvas.setFillColor(colors.gray)
         canvas.drawString(15*mm, 10*mm, "Generated by QorSense AI Engine.")
         canvas.drawRightString(195*mm, 10*mm, "Produced by Pikolab Ar&Ge Ltd.")
-        
+
         canvas.restoreState()
 
     def generate(self, metrics: dict, raw_data: list, diagnosis: str, health_score: float):
         story = []
-        
+
         # 1. Executive Summary & Asset Info
         sensor_id = metrics.get('sensor_id', 'Unknown')
-        
+
         if health_score >= 80:
             status_text = "OPTIMAL"
             status_color = colors.HexColor('#10b981')
@@ -273,7 +272,7 @@ class QorSenseReportGenerator:
             [Paragraph("<b>Location:</b>", self.styles['NormalSmall']), Paragraph(metrics.get('location', 'N/A'), self.styles['NormalSmall'])],
             [Paragraph("<b>Type:</b>", self.styles['NormalSmall']), Paragraph(metrics.get('source_type', 'N/A'), self.styles['NormalSmall'])]
         ]
-        
+
         t_asset = Table(asset_info, colWidths=[30*mm, 60*mm])
         t_asset.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -296,20 +295,20 @@ class QorSenseReportGenerator:
             ('TOPPADDING', (0,0), (-1,-1), 6),
             ('ROUNDEDCORNERS', [6,6,6,6]),
         ]))
-        
+
         # Summary Header Wrapper
         main_header_data = [[t_asset, t_score]]
         t_main = Table(main_header_data, colWidths=[110*mm, 60*mm])
         t_main.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('ALIGN', (1,0), (1,0), 'RIGHT')]))
         story.append(t_main)
         story.append(Spacer(1, 10*mm))
-        
+
         # Generate Charts
         chart_paths = ChartGenerator.generate_all_charts(raw_data, metrics)
 
         # 2. Detailed Technical Analysis (Left) vs Radar Chart (Right)
         story.append(Paragraph("Technical Metrics & Risk Profile", self.styles['SectionHeader']))
-        
+
         def get_icon(val, metric_type):
             if metric_type == 'slope': return "!" if abs(val) > 0.1 else "OK"
             if metric_type == 'noise': return "!" if val > 1.5 else "OK"
@@ -324,7 +323,7 @@ class QorSenseReportGenerator:
             ["Hysteresis", f"{metrics.get('hysteresis',0):.3f}", "< 0.5", "OK"],
             ["DFA (Hurst)", f"{metrics.get('hurst',0.5):.2f}", "0.5+/-", "OK"],
         ]
-        
+
         t_metrics = Table(metric_rows, colWidths=[30*mm, 25*mm, 20*mm, 15*mm])
         t_metrics.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), self.brand_primary),
@@ -334,7 +333,7 @@ class QorSenseReportGenerator:
             ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
             ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, self.light_gray]),
         ]))
-        
+
         # Radar Chart
         radar_img = None
         if 'radar' in chart_paths:
@@ -350,48 +349,48 @@ class QorSenseReportGenerator:
             ('ALIGN', (1,0), (1,0), 'CENTER'),
         ]))
         story.append(t_mid)
-        
+
         # AI Diagnosis
         story.append(Spacer(1, 5*mm))
         story.append(Paragraph(f"<b>Diagnosis:</b> {diagnosis}", self.styles['Normal']))
         if metrics.get('recommendation'):
              story.append(Paragraph(f"<b>Recommendation:</b> {metrics.get('recommendation')}", self.styles['Normal']))
-        
+
         # 3. Visual Evidence
         story.append(Spacer(1, 10*mm))
         story.append(Paragraph("Signal Analysis Evidence", self.styles['SectionHeader']))
-        
+
         if 'trend' in chart_paths:
             story.append(Image(chart_paths['trend'], width=170*mm, height=75*mm))
             story.append(Paragraph("Figure 1: Raw Signal Trend and Drift Line", self.styles['NormalSmall']))
-        
+
         # Side by Side: Hysteresis & DFA
         charts_row = []
         if 'hysteresis' in chart_paths:
              img_hyst = Image(chart_paths['hysteresis'], width=85*mm, height=75*mm)
              charts_row.append(img_hyst)
-        
+
         if 'dfa' in chart_paths:
              img_dfa = Image(chart_paths['dfa'], width=85*mm, height=75*mm)
              charts_row.append(img_dfa)
-             
+
         if charts_row:
             story.append(Spacer(1, 5*mm))
             t_charts = Table([charts_row], colWidths=[85*mm] * len(charts_row))
             t_charts.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('ALIGN', (0,0), (-1,-1), 'CENTER')]))
             story.append(t_charts)
-            
+
             # Captions
             captions = []
             if 'hysteresis' in chart_paths: captions.append("Fig 2: Hysteresis (Phase Plot)")
             if 'dfa' in chart_paths: captions.append("Fig 3: DFA (Fractal Analysis)")
-            
+
             t_caps = Table([captions], colWidths=[85*mm] * len(captions))
             t_caps.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER'), ('FONTSIZE', (0,0), (-1,-1), 9), ('TEXTCOLOR', (0,0), (-1,-1), self.dark_gray)]))
             story.append(t_caps)
 
         story.append(Spacer(1, 10*mm))
-        
+
         # 4. Sign-off
         story.append(Paragraph("Approval", self.styles['SectionHeader']))
         sign_data = [

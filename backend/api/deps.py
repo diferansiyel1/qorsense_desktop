@@ -32,18 +32,17 @@ Usage Examples:
         return {"org": org_id}
 """
 
-from typing import Annotated, Optional, List, Union
 from dataclasses import dataclass
-from fastapi import Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from typing import Annotated
 
-from backend.database import get_db
 from backend.core.config import settings
 from backend.core.security import verify_token
-from backend.models_db import User, Role
-
+from backend.database import get_db
+from backend.models_db import Role, User
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ==============================================================================
 # OAUTH2 CONFIGURATION
@@ -69,29 +68,29 @@ class TokenClaims:
     Use this for lightweight permission checks.
     """
     user_id: str
-    org_id: Optional[str]
+    org_id: str | None
     role: Role
-    
+
     @property
     def is_super_admin(self) -> bool:
         """Check if user has SUPER_ADMIN role."""
         return self.role == Role.SUPER_ADMIN
-    
+
     @property
     def is_org_admin(self) -> bool:
         """Check if user has ORG_ADMIN role."""
         return self.role == Role.ORG_ADMIN
-    
+
     @property
     def is_engineer(self) -> bool:
         """Check if user has ENGINEER role."""
         return self.role == Role.ENGINEER
-    
+
     @property
     def role_value(self) -> str:
         """Get role as string value."""
         return self.role.value if isinstance(self.role, Role) else str(self.role)
-    
+
     def can_access_org(self, org_id: str) -> bool:
         """
         Check if user can access the specified organization.
@@ -102,8 +101,8 @@ class TokenClaims:
         if self.is_super_admin:
             return True
         return self.org_id == org_id
-    
-    def has_role(self, roles: List[str]) -> bool:
+
+    def has_role(self, roles: list[str]) -> bool:
         """
         Check if user has one of the specified roles.
         
@@ -116,7 +115,7 @@ class TokenClaims:
         return self.role_value in roles
 
 
-def parse_token_claims(payload: dict) -> Optional[TokenClaims]:
+def parse_token_claims(payload: dict) -> TokenClaims | None:
     """
     Parse JWT payload into TokenClaims object.
     
@@ -125,13 +124,13 @@ def parse_token_claims(payload: dict) -> Optional[TokenClaims]:
     user_id = payload.get("sub")
     if not user_id:
         return None
-    
+
     role_str = payload.get("role", "engineer")
     try:
         role = Role(role_str)
     except ValueError:
         role = Role.ENGINEER  # Default fallback
-    
+
     return TokenClaims(
         user_id=user_id,
         org_id=payload.get("org_id"),
@@ -169,8 +168,8 @@ class RoleChecker:
         ):
             ...
     """
-    
-    def __init__(self, allowed_roles: List[str]):
+
+    def __init__(self, allowed_roles: list[str]):
         """
         Initialize RoleChecker with allowed roles.
         
@@ -179,10 +178,10 @@ class RoleChecker:
                           Valid values: "super_admin", "org_admin", "engineer"
         """
         self.allowed_roles = allowed_roles
-    
+
     async def __call__(
         self,
-        token: Annotated[Optional[str], Depends(oauth2_scheme)],
+        token: Annotated[str | None, Depends(oauth2_scheme)],
         db: Annotated[AsyncSession, Depends(get_db)]
     ) -> bool:
         """
@@ -197,7 +196,7 @@ class RoleChecker:
                 detail="Kimlik doğrulama gerekli",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         # Decode and validate token
         payload = verify_token(token, token_type="access")
         if payload is None:
@@ -206,7 +205,7 @@ class RoleChecker:
                 detail="Geçersiz veya süresi dolmuş token",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         # Parse claims
         claims = parse_token_claims(payload)
         if claims is None:
@@ -215,33 +214,33 @@ class RoleChecker:
                 detail="Token içeriği geçersiz",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         # Check role
         if not claims.has_role(self.allowed_roles):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Bu işlem için yetkiniz yok. Gerekli roller: {', '.join(self.allowed_roles)}",
             )
-        
+
         # Optionally verify user still exists and is active
         result = await db.execute(
             select(User).where(User.id == claims.user_id)
         )
         user = result.scalar_one_or_none()
-        
+
         if user is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Kullanıcı bulunamadı",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         if not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Hesabınız devre dışı bırakılmış",
             )
-        
+
         return True
 
 
@@ -250,7 +249,7 @@ class RoleChecker:
 # ==============================================================================
 
 async def get_token_claims(
-    token: Annotated[Optional[str], Depends(oauth2_scheme)],
+    token: Annotated[str | None, Depends(oauth2_scheme)],
 ) -> TokenClaims:
     """
     Get token claims from JWT without DB lookup.
@@ -267,7 +266,7 @@ async def get_token_claims(
             detail="Kimlik doğrulama gerekli - Token bulunamadı",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     payload = verify_token(token, token_type="access")
     if payload is None:
         raise HTTPException(
@@ -275,7 +274,7 @@ async def get_token_claims(
             detail="Geçersiz veya süresi dolmuş token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     claims = parse_token_claims(payload)
     if claims is None:
         raise HTTPException(
@@ -283,12 +282,12 @@ async def get_token_claims(
             detail="Token içeriği geçersiz",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     return claims
 
 
 async def get_current_user(
-    token: Annotated[Optional[str], Depends(oauth2_scheme)],
+    token: Annotated[str | None, Depends(oauth2_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ) -> User:
     """
@@ -307,7 +306,7 @@ async def get_current_user(
             detail="Kimlik doğrulama gerekli - Token bulunamadı",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     payload = verify_token(token, token_type="access")
     if payload is None:
         raise HTTPException(
@@ -315,34 +314,34 @@ async def get_current_user(
             detail="Geçersiz veya süresi dolmuş token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    user_id: Optional[str] = payload.get("sub")
+
+    user_id: str | None = payload.get("sub")
     if user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token içeriği geçersiz - user_id bulunamadı",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     # Fetch user from database by ID (UUID)
     result = await db.execute(
         select(User).where(User.id == user_id)
     )
     user = result.scalar_one_or_none()
-    
+
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Kullanıcı bulunamadı",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Hesabınız devre dışı bırakılmış"
         )
-    
+
     return user
 
 
@@ -364,7 +363,7 @@ async def get_current_active_user(
 
 
 async def get_current_org_user(
-    token: Annotated[Optional[str], Depends(oauth2_scheme)],
+    token: Annotated[str | None, Depends(oauth2_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ) -> User:
     """
@@ -386,7 +385,7 @@ async def get_current_org_user(
             detail="Kimlik doğrulama gerekli",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     payload = verify_token(token, token_type="access")
     if payload is None:
         raise HTTPException(
@@ -394,54 +393,54 @@ async def get_current_org_user(
             detail="Geçersiz veya süresi dolmuş token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    user_id: Optional[str] = payload.get("sub")
-    token_org_id: Optional[str] = payload.get("org_id")
-    
+
+    user_id: str | None = payload.get("sub")
+    token_org_id: str | None = payload.get("org_id")
+
     if user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token içeriği geçersiz",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     # Fetch user from database
     result = await db.execute(
         select(User).where(User.id == user_id)
     )
     user = result.scalar_one_or_none()
-    
+
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Kullanıcı bulunamadı",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Hesabınız devre dışı bırakılmış"
         )
-    
+
     # SUPER_ADMIN can bypass org check
     if user.role == Role.SUPER_ADMIN:
         return user
-    
+
     # Validate organization membership
     if user.organization_id is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Bir organizasyona ait değilsiniz"
         )
-    
+
     # Validate token org_id matches user's org
     if token_org_id and user.organization_id != token_org_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Organizasyon yetkisi eşleşmiyor - yeniden giriş yapın"
         )
-    
+
     return user
 
 
@@ -482,9 +481,9 @@ async def get_current_super_admin(
 # ==============================================================================
 
 async def get_optional_user(
-    token: Annotated[Optional[str], Depends(oauth2_scheme)],
+    token: Annotated[str | None, Depends(oauth2_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)]
-) -> Optional[User]:
+) -> User | None:
     """
     Optionally get the current user if authenticated.
     
@@ -493,30 +492,30 @@ async def get_optional_user(
     """
     if token is None:
         return None
-    
+
     payload = verify_token(token, token_type="access")
     if payload is None:
         return None
-    
-    user_id: Optional[str] = payload.get("sub")
+
+    user_id: str | None = payload.get("sub")
     if user_id is None:
         return None
-    
+
     result = await db.execute(
         select(User).where(User.id == user_id)
     )
     user = result.scalar_one_or_none()
-    
+
     if user is None or not user.is_active:
         return None
-    
+
     return user
 
 
 async def get_current_user_or_dev_bypass(
-    token: Annotated[Optional[str], Depends(oauth2_scheme)],
+    token: Annotated[str | None, Depends(oauth2_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)]
-) -> Optional[User]:
+) -> User | None:
     """
     Get current user OR bypass auth in development mode.
     
@@ -530,7 +529,7 @@ async def get_current_user_or_dev_bypass(
     # Development mode bypass
     if settings.is_development and token is None:
         return None
-    
+
     # Production mode: require auth
     if not settings.is_development and token is None:
         raise HTTPException(
@@ -538,7 +537,7 @@ async def get_current_user_or_dev_bypass(
             detail="Kimlik doğrulama gerekli",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     # If token provided, validate it
     if token is not None:
         payload = verify_token(token, token_type="access")
@@ -550,8 +549,8 @@ async def get_current_user_or_dev_bypass(
                 detail="Geçersiz veya süresi dolmuş token",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
-        user_id: Optional[str] = payload.get("sub")
+
+        user_id: str | None = payload.get("sub")
         if user_id:
             result = await db.execute(
                 select(User).where(User.id == user_id)
@@ -559,10 +558,10 @@ async def get_current_user_or_dev_bypass(
             user = result.scalar_one_or_none()
             if user and user.is_active:
                 return user
-    
+
     if settings.is_development:
         return None
-    
+
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Kimlik doğrulama başarısız",
@@ -609,13 +608,13 @@ class OrgAccessChecker:
         ):
             ...
     """
-    
+
     def __init__(self, org_id_param: str = "org_id"):
         """
         Initialize with the name of the path parameter containing org_id.
         """
         self.org_id_param = org_id_param
-    
+
     async def __call__(
         self,
         request: Request,
@@ -630,13 +629,13 @@ class OrgAccessChecker:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Organizasyon ID'si ({self.org_id_param}) path'te bulunamadı"
             )
-        
+
         if not claims.can_access_org(org_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Bu organizasyona erişim yetkiniz yok"
             )
-        
+
         return True
 
 
@@ -653,8 +652,8 @@ CurrentActiveUser = Annotated[User, Depends(get_current_active_user)]
 CurrentOrgUser = Annotated[User, Depends(get_current_org_user)]
 CurrentOrgAdmin = Annotated[User, Depends(get_current_org_admin)]
 CurrentSuperAdmin = Annotated[User, Depends(get_current_super_admin)]
-OptionalUser = Annotated[Optional[User], Depends(get_optional_user)]
-DevUser = Annotated[Optional[User], Depends(get_current_user_or_dev_bypass)]
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]
+DevUser = Annotated[User | None, Depends(get_current_user_or_dev_bypass)]
 
 # Token claims (lightweight, no DB lookup)
 Claims = Annotated[TokenClaims, Depends(get_token_claims)]

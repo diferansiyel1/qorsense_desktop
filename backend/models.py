@@ -4,12 +4,12 @@ Pydantic Models for QorSense Sensor Analysis.
 This module defines data models for sensor configuration, analysis input/output,
 and sensor-type-specific threshold configurations for industrial process monitoring.
 """
-from enum import Enum
-from typing import List, Optional, Dict, Any, Literal, Union
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator, model_validator
-import numpy as np
+from enum import Enum
+from typing import Literal
 
+import numpy as np
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # =============================================================================
 # SENSOR CATALOG
@@ -78,33 +78,33 @@ class SensorLimitConfig(BaseModel):
     """
     # Sensor identification
     sensor_type: Literal["pH", "DO", "Pressure", "Temperature", "Flow", "Conductivity", "Generic"] = "Generic"
-    
+
     # Slope thresholds (drift detection) - units per sample
     slope_warning: float = Field(default=0.05, ge=0, description="Warning threshold for drift rate")
     slope_critical: float = Field(default=0.1, ge=0, description="Critical threshold for drift rate")
-    
+
     # Bias thresholds (offset from reference)
     bias_warning: float = Field(default=1.0, ge=0, description="Warning threshold for bias")
     bias_critical: float = Field(default=2.0, ge=0, description="Critical threshold for bias")
-    
+
     # Noise thresholds (standard deviation of residuals)
     noise_warning: float = Field(default=1.0, ge=0, description="Warning threshold for noise std")
     noise_critical: float = Field(default=2.0, ge=0, description="Critical threshold for noise std")
-    
+
     # SNR thresholds (dB)
     snr_warning: float = Field(default=20.0, description="Warning threshold for SNR (dB)")
     snr_critical: float = Field(default=10.0, description="Critical threshold for SNR (dB)")
-    
+
     # DFA/Hurst thresholds
     hurst_upper_critical: float = Field(default=0.8, ge=0.5, le=1.0, description="Upper threshold for Hurst (persistence)")
     hurst_lower_warning: float = Field(default=0.2, ge=0, le=0.5, description="Lower threshold for Hurst (anti-persistence)")
-    
+
     # Hysteresis threshold
     hysteresis_critical: float = Field(default=0.5, ge=0, description="Critical threshold for hysteresis score")
-    
+
     # Data requirements
     min_data_points: int = Field(default=50, ge=10, description="Minimum data points required")
-    
+
     # Scoring weights (optional tuning)
     weight_slope: float = Field(default=1.0, ge=0, description="Weight for slope penalty")
     weight_bias: float = Field(default=1.0, ge=0, description="Weight for bias penalty")
@@ -129,7 +129,7 @@ class SensorLimitConfig(BaseModel):
 # PREDEFINED SENSOR LIMIT PRESETS
 # =============================================================================
 
-SENSOR_LIMIT_PRESETS: Dict[str, SensorLimitConfig] = {
+SENSOR_LIMIT_PRESETS: dict[str, SensorLimitConfig] = {
     "pH": SensorLimitConfig(
         sensor_type="pH",
         slope_warning=0.02,
@@ -244,11 +244,11 @@ def get_sensor_limits(sensor_type: str) -> SensorLimitConfig:
     """
     # Normalize sensor type name
     normalized = sensor_type.strip().replace(" ", "").lower()
-    
+
     for key, config in SENSOR_LIMIT_PRESETS.items():
         if key.lower() == normalized:
             return config
-    
+
     # Check for partial matches
     if "ph" in normalized:
         return SENSOR_LIMIT_PRESETS["pH"]
@@ -262,7 +262,7 @@ def get_sensor_limits(sensor_type: str) -> SensorLimitConfig:
         return SENSOR_LIMIT_PRESETS["Flow"]
     if "conduct" in normalized:
         return SENSOR_LIMIT_PRESETS["Conductivity"]
-    
+
     return SENSOR_LIMIT_PRESETS["Generic"]
 
 
@@ -284,7 +284,7 @@ class SensorConfig(BaseModel):
     hysteresis_critical: float = 0.5
     dfa_critical: float = 0.8
     min_data_points: int = 50
-    
+
     def to_limit_config(self, sensor_type: str = "Generic") -> SensorLimitConfig:
         """Convert to new SensorLimitConfig format."""
         return SensorLimitConfig(
@@ -325,36 +325,36 @@ class AnalysisInput(BaseModel):
         ...     reference_value=7.0
         ... )
     """
-    data: List[float] = Field(..., min_length=10, description="Sensor data values")
+    data: list[float] = Field(..., min_length=10, description="Sensor data values")
     sensor_type: str = Field(default="Generic", description="Sensor type for threshold selection")
-    reference_value: Optional[float] = Field(default=None, description="Calibration reference point")
-    config: Optional[SensorLimitConfig] = Field(default=None, description="Custom limit configuration")
-    
+    reference_value: float | None = Field(default=None, description="Calibration reference point")
+    config: SensorLimitConfig | None = Field(default=None, description="Custom limit configuration")
+
     @field_validator("data")
     @classmethod
-    def validate_data(cls, v: List[float]) -> List[float]:
+    def validate_data(cls, v: list[float]) -> list[float]:
         """Validate data for NaN, Inf, and constant values."""
         if not v:
             raise ValueError("Data cannot be empty")
-        
+
         arr = np.array(v, dtype=np.float64)
-        
+
         # Check for NaN
         nan_count = np.sum(np.isnan(arr))
         if nan_count > 0:
             raise ValueError(f"Data contains {nan_count} NaN values")
-        
+
         # Check for Inf
         inf_count = np.sum(np.isinf(arr))
         if inf_count > 0:
             raise ValueError(f"Data contains {inf_count} Inf values")
-        
+
         # Check for constant signal (flat line)
         if np.std(arr) < 1e-10:
             raise ValueError("Constant/flat-line signal detected (zero variance)")
-        
+
         return v
-    
+
     def get_effective_config(self) -> SensorLimitConfig:
         """Get the effective configuration (custom or preset)."""
         if self.config is not None:
@@ -377,15 +377,15 @@ class DFAResult(BaseModel):
     """Result of DFA calculation."""
     hurst: float = Field(..., description="Hurst exponent (slope of log-log plot)")
     r_squared: float = Field(..., description="R² of the linear fit")
-    scales: List[float] = Field(default_factory=list, description="Scales used")
-    fluctuations: List[float] = Field(default_factory=list, description="Fluctuations at each scale")
+    scales: list[float] = Field(default_factory=list, description="Scales used")
+    fluctuations: list[float] = Field(default_factory=list, description="Fluctuations at each scale")
 
 
 class HysteresisResult(BaseModel):
     """Result of hysteresis calculation."""
     score: float = Field(..., description="Hysteresis score (0-1)")
-    rising_values: List[float] = Field(default_factory=list, description="Values during rising edges")
-    falling_values: List[float] = Field(default_factory=list, description="Values during falling edges")
+    rising_values: list[float] = Field(default_factory=list, description="Values during rising edges")
+    falling_values: list[float] = Field(default_factory=list, description="Values during falling edges")
 
 
 class HealthResult(BaseModel):
@@ -393,9 +393,9 @@ class HealthResult(BaseModel):
     score: float = Field(..., ge=0, le=100, description="Health score (0-100)")
     status: Literal["Green", "Yellow", "Red"] = Field(..., description="Status color")
     diagnosis: str = Field(..., description="Diagnosis summary")
-    flags: List[str] = Field(default_factory=list, description="Active flags")
+    flags: list[str] = Field(default_factory=list, description="Active flags")
     recommendation: str = Field(..., description="Recommended action")
-    penalties: Dict[str, float] = Field(default_factory=dict, description="Penalty breakdown")
+    penalties: dict[str, float] = Field(default_factory=dict, description="Penalty breakdown")
 
 
 # =============================================================================
@@ -406,7 +406,7 @@ class SensorCreate(BaseModel):
     name: str
     location: str
     source_type: str = "CSV"
-    organization_id: Optional[str] = None
+    organization_id: str | None = None
     sensor_type: str
     unit: str
 
@@ -416,10 +416,10 @@ class SensorResponse(BaseModel):
     name: str
     location: str
     source_type: str
-    organization_id: Optional[str] = None
-    latest_health_score: Optional[float] = 100.0
-    latest_status: Optional[str] = "Normal"
-    latest_analysis_timestamp: Optional[datetime] = None
+    organization_id: str | None = None
+    latest_health_score: float | None = 100.0
+    latest_status: str | None = "Normal"
+    latest_analysis_timestamp: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -428,9 +428,9 @@ class SensorResponse(BaseModel):
 class SensorDataInput(BaseModel):
     sensor_id: str
     sensor_type: str = "Generic"
-    values: List[float] = []
-    timestamps: Optional[List[str]] = None
-    config: Optional[SensorConfig] = SensorConfig()
+    values: list[float] = []
+    timestamps: list[str] | None = None
+    config: SensorConfig | None = SensorConfig()
 
 
 class AnalysisMetrics(BaseModel):
@@ -438,21 +438,21 @@ class AnalysisMetrics(BaseModel):
     slope: float
     snr_db: float
     hysteresis: float
-    noise_std: Optional[float] = 0.0
-    hysteresis_x: List[float] = []
-    hysteresis_y: List[float] = []
-    hurst: Optional[float] = 0.5
-    hurst_r2: Optional[float] = 0.0
-    dfa_alpha: Optional[float] = None
-    dfa_r_squared: Optional[float] = None
-    dfa_scales: List[float] = []
-    dfa_fluctuations: List[float] = []
-    timestamps: Optional[List[str]] = None
-    trend: Optional[List[float]] = None
-    residuals: Optional[List[float]] = None
+    noise_std: float | None = 0.0
+    hysteresis_x: list[float] = []
+    hysteresis_y: list[float] = []
+    hurst: float | None = 0.5
+    hurst_r2: float | None = 0.0
+    dfa_alpha: float | None = None
+    dfa_r_squared: float | None = None
+    dfa_scales: list[float] = []
+    dfa_fluctuations: list[float] = []
+    timestamps: list[str] | None = None
+    trend: list[float] | None = None
+    residuals: list[float] | None = None
     # New fields for enhanced analysis
-    bias_result: Optional[BiasResult] = None
-    error_code: Optional[str] = None
+    bias_result: BiasResult | None = None
+    error_code: str | None = None
 
 
 class AnalysisResult(BaseModel):
@@ -461,10 +461,10 @@ class AnalysisResult(BaseModel):
     health_score: float
     status: str
     metrics: AnalysisMetrics
-    flags: List[str]
+    flags: list[str]
     recommendation: str
     diagnosis: str
-    prediction: Optional[str] = None
+    prediction: str | None = None
 
 
 class SyntheticRequest(BaseModel):
@@ -477,7 +477,7 @@ class ReportRequest(BaseModel):
     health_score: float
     metrics: AnalysisMetrics
     diagnosis: str
-    status: Optional[str] = "Unknown"
-    flags: List[str] = []
+    status: str | None = "Unknown"
+    flags: list[str] = []
     recommendation: str = ""
-    data: Optional[List[float]] = None
+    data: list[float] | None = None

@@ -1,9 +1,10 @@
-import sys
-import os
 import logging
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QPalette, QColor
+import os
+import sys
+
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtWidgets import QApplication
 
 # Ensure import paths work
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -24,7 +25,7 @@ def apply_dark_theme(app):
     """Applies a Fusion-based Dark Industrial Theme."""
     app.setStyle("Fusion")
     palette = QPalette()
-    
+
     palette.setColor(QPalette.ColorRole.Window, COLOR_BACKGROUND)
     palette.setColor(QPalette.ColorRole.WindowText, COLOR_TEXT)
     palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
@@ -37,7 +38,7 @@ def apply_dark_theme(app):
     palette.setColor(QPalette.ColorRole.Link, COLOR_ACCENT)
     palette.setColor(QPalette.ColorRole.Highlight, COLOR_ACCENT)
     palette.setColor(QPalette.ColorRole.HighlightedText, Qt.GlobalColor.white)
-    
+
     app.setPalette(palette)
     app.setStyleSheet("""
         QToolTip { color: #ffffff; background-color: #2a82da; border: 1px solid white; }
@@ -48,36 +49,36 @@ def apply_dark_theme(app):
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
+
     app = QApplication(sys.argv)
     apply_dark_theme(app)
-    
+
     # --- LICENSE CHECK ---
     from backend.license_manager import LicenseManager
     from desktop_app.ui.license_dialog import LicenseDialog
-    
+
     license_manager = LicenseManager()
-    
+
     # Check if valid license exists
     if not license_manager.is_licensed():
         logging.info("No valid license found. Showing license dialog...")
-        
+
         dialog = LicenseDialog(license_manager)
         result = dialog.exec()
-        
+
         if result != LicenseDialog.DialogCode.Accepted:
             logging.warning("License activation cancelled. Exiting application.")
             sys.exit(1)
-        
+
         # Verify again after dialog
         if not license_manager.is_licensed():
             logging.error("License verification failed after dialog. Exiting.")
             sys.exit(1)
-    
+
     logging.info("License verified. Starting main application...")
-    
+
     window = QorSenseMainWindow()
     window.show()
-    
+
     sys.exit(app.exec())
 

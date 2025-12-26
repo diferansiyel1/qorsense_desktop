@@ -5,7 +5,8 @@ This module defines type-safe configuration models for Modbus TCP/RTU sensors,
 including data types, connection parameters, and device status tracking.
 """
 from enum import Enum
-from typing import Literal, Optional, Any
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -24,11 +25,11 @@ class DataType(str, Enum):
     FLOAT32_LE = "float32_le"      # Little-endian (DCBA)
     FLOAT32_BS = "float32_bs"      # Byte-swapped (BADC)
     FLOAT32_WS = "float32_ws"      # Word-swapped (CDAB)
-    
+
     # 16-bit Integers
     INT16 = "int16"
     UINT16 = "uint16"
-    
+
     # 32-bit Integers
     INT32_BE = "int32_be"
     INT32_LE = "int32_le"
@@ -97,13 +98,13 @@ class SensorConfig(BaseModel):
     """
     # Identification
     name: str = Field(..., min_length=1, max_length=100, description="Sensor identifier")
-    
+
     # Connection type
     connection_type: ConnectionType = Field(
         default=ConnectionType.TCP,
         description="TCP or RTU connection"
     )
-    
+
     # TCP Parameters
     ip: str = Field(
         default="192.168.1.100",
@@ -115,7 +116,7 @@ class SensorConfig(BaseModel):
         le=65535,
         description="TCP port number"
     )
-    
+
     # RTU Parameters
     serial_port: str = Field(
         default="/dev/ttyUSB0",
@@ -137,7 +138,7 @@ class SensorConfig(BaseModel):
         default=8,
         description="Serial data bits"
     )
-    
+
     # Modbus Parameters
     slave_id: int = Field(
         default=1,
@@ -163,7 +164,7 @@ class SensorConfig(BaseModel):
         le=4,
         description="Modbus function code (3=Holding, 4=Input)"
     )
-    
+
     # Data Processing
     data_type: DataType = Field(
         default=DataType.FLOAT32_BE,
@@ -177,7 +178,7 @@ class SensorConfig(BaseModel):
         default=0.0,
         description="Offset added after scaling"
     )
-    
+
     # Fault Tolerance
     timeout: float = Field(
         default=3.0,
@@ -191,14 +192,14 @@ class SensorConfig(BaseModel):
         le=10,
         description="Max failures before circuit opens"
     )
-    
+
     # Polling
     poll_interval: float = Field(
         default=1.0,
         gt=0,
         description="Polling interval in seconds"
     )
-    
+
     # Extended data extraction (for Visiferm-style sensors)
     value_register_offset: int = Field(
         default=0,
@@ -254,9 +255,8 @@ class SensorConfig(BaseModel):
         """
         if self.connection_type == ConnectionType.TCP:
             return f"tcp://{self.ip}:{self.port}"
-        else:
-            # Include all serial parameters to ensure unique connections
-            return f"rtu://{self.serial_port}@{self.baudrate}-{self.parity}{self.bytesize}{self.stopbits}"
+        # Include all serial parameters to ensure unique connections
+        return f"rtu://{self.serial_port}@{self.baudrate}-{self.parity}{self.bytesize}{self.stopbits}"
 
     def get_display_name(self) -> str:
         """
@@ -267,8 +267,7 @@ class SensorConfig(BaseModel):
         """
         if self.connection_type == ConnectionType.TCP:
             return f"{self.name} ({self.ip}:{self.port}/Reg{self.register_address})"
-        else:
-            return f"{self.name} ({self.serial_port}/Reg{self.register_address})"
+        return f"{self.name} ({self.serial_port}/Reg{self.register_address})"
 
     class Config:
         """Pydantic model configuration."""
@@ -287,11 +286,11 @@ class DeviceState(BaseModel):
     status: DeviceStatus = DeviceStatus.UNKNOWN
     circuit_state: CircuitState = CircuitState.CLOSED
     failure_count: int = 0
-    last_success_time: Optional[float] = None
-    last_failure_time: Optional[float] = None
-    last_value: Optional[float] = None
+    last_success_time: float | None = None
+    last_failure_time: float | None = None
+    last_value: float | None = None
     reconnect_attempt: int = 0
-    next_retry_time: Optional[float] = None
+    next_retry_time: float | None = None
 
     class Config:
         """Pydantic model configuration."""

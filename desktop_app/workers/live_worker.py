@@ -12,33 +12,20 @@ This module provides the main ModbusWorker class that runs in a separate
 QThread and polls configured sensors at specified intervals.
 """
 import json
-import time
 import logging
 import threading
+import time
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Tuple, Any, Callable
-from dataclasses import dataclass, field as dataclass_field
+from typing import Any
 
-from PyQt6.QtCore import QThread, pyqtSignal, QMutex, QReadWriteLock
+from PyQt6.QtCore import QMutex, QReadWriteLock, QThread, pyqtSignal
+
+from .modbus_decoder import ModbusDecoder
+from .modbus_poller import ModbusPoller
 
 # Local imports
-from .models import (
-    SensorConfig,
-    ConnectionType,
-    DataType,
-    DeviceStatus,
-    CircuitState,
-    DeviceState
-)
-from .modbus_decoder import ModbusDecoder
-from .circuit_breaker import (
-    CircuitBreaker,
-    CircuitBreakerConfig,
-    CircuitBreakerRegistry,
-    CircuitOpenError
-)
-from .modbus_poller import ModbusPoller, ModbusConnection, ModbusReadError
-
+from .models import ConnectionType, DataType, DeviceState, DeviceStatus, SensorConfig
 
 # --- Structured Logger ---
 
@@ -69,7 +56,7 @@ class StructuredLogger:
             "sensor_id": sensor_id,
             **kwargs
         }
-        
+
         log_func = getattr(self._logger, level.lower(), self._logger.info)
         log_func(json.dumps(entry))
 
@@ -79,7 +66,7 @@ class StructuredLogger:
         status: str,
         device: str,
         connection_type: str,
-        details: Optional[Dict[str, Any]] = None
+        details: dict[str, Any] | None = None
     ) -> None:
         """Log connection events."""
         self._emit(
@@ -129,7 +116,7 @@ class StructuredLogger:
         self,
         sensor_id: str,
         value: float,
-        raw_registers: List[int],
+        raw_registers: list[int],
         timestamp: float
     ) -> None:
         """Log successful reads."""
@@ -178,7 +165,7 @@ class StructuredLogger:
         sensor_id: str,
         error_type: str,
         message: str,
-        traceback: Optional[str] = None
+        traceback: str | None = None
     ) -> None:
         """Log critical errors."""
         self._emit(
@@ -218,9 +205,9 @@ class ThreadSafeDataBuffer:
             max_size: Maximum samples per sensor before rotation
         """
         self._lock = QReadWriteLock()
-        self._data: Dict[str, List[Tuple[float, float]]] = {}
+        self._data: dict[str, list[tuple[float, float]]] = {}
         self._max_size = max_size
-        self._latest_values: Dict[str, Tuple[float, float]] = {}
+        self._latest_values: dict[str, tuple[float, float]] = {}
 
     def write(self, sensor_id: str, value: float, timestamp: float) -> None:
         """
@@ -237,10 +224,10 @@ class ThreadSafeDataBuffer:
         try:
             if sensor_id not in self._data:
                 self._data[sensor_id] = []
-            
+
             self._data[sensor_id].append((value, timestamp))
             self._latest_values[sensor_id] = (value, timestamp)
-            
+
             # Rotate if exceeding max size
             if len(self._data[sensor_id]) > self._max_size:
                 # Keep last 80% to avoid frequent rotations
@@ -253,7 +240,7 @@ class ThreadSafeDataBuffer:
         self,
         sensor_id: str,
         count: int = 100
-    ) -> List[Tuple[float, float]]:
+    ) -> list[tuple[float, float]]:
         """
         Read the latest N samples for a sensor.
         
@@ -274,7 +261,7 @@ class ThreadSafeDataBuffer:
         finally:
             self._lock.unlock()
 
-    def read_all(self, sensor_id: str) -> List[Tuple[float, float]]:
+    def read_all(self, sensor_id: str) -> list[tuple[float, float]]:
         """
         Read all samples for a sensor.
         
@@ -292,7 +279,7 @@ class ThreadSafeDataBuffer:
         finally:
             self._lock.unlock()
 
-    def get_latest_value(self, sensor_id: str) -> Optional[Tuple[float, float]]:
+    def get_latest_value(self, sensor_id: str) -> tuple[float, float] | None:
         """
         Get the most recent value for a sensor.
         
@@ -308,7 +295,7 @@ class ThreadSafeDataBuffer:
         finally:
             self._lock.unlock()
 
-    def get_all_latest_values(self) -> Dict[str, Tuple[float, float]]:
+    def get_all_latest_values(self) -> dict[str, tuple[float, float]]:
         """
         Get the most recent value for all sensors.
         
@@ -321,7 +308,7 @@ class ThreadSafeDataBuffer:
         finally:
             self._lock.unlock()
 
-    def clear(self, sensor_id: Optional[str] = None) -> None:
+    def clear(self, sensor_id: str | None = None) -> None:
         """
         Clear buffer data.
         
@@ -362,7 +349,7 @@ class ReconnectionManager:
         self,
         poller: ModbusPoller,
         logger: StructuredLogger,
-        on_device_recovered: Optional[Callable[[str], None]] = None
+        on_device_recovered: Callable[[str], None] | None = None
     ):
         """
         Initialize the manager.
@@ -375,11 +362,11 @@ class ReconnectionManager:
         self._poller = poller
         self._logger = logger
         self._on_device_recovered = on_device_recovered
-        
-        self._pending_devices: Dict[str, DeviceState] = {}
+
+        self._pending_devices: dict[str, DeviceState] = {}
         self._lock = threading.RLock()
         self._running = False
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
     def schedule_reconnect(self, sensor_id: str, config: SensorConfig) -> None:
         """
@@ -397,14 +384,14 @@ class ReconnectionManager:
                     reconnect_attempt=0
                 )
                 self._pending_devices[sensor_id] = state
-            
+
             state = self._pending_devices[sensor_id]
             state.reconnect_attempt += 1
-            
+
             # Calculate backoff delay
             delay = min(2 ** state.reconnect_attempt, 60)  # Cap at 60s
             state.next_retry_time = time.time() + delay
-            
+
             self._logger.log_retry_attempt(
                 sensor_id,
                 config.get_connection_key(),
@@ -421,7 +408,7 @@ class ReconnectionManager:
         """Start the reconnection thread."""
         if self._running:
             return
-        
+
         self._running = True
         self._thread = threading.Thread(
             target=self._reconnection_loop,
@@ -441,28 +428,28 @@ class ReconnectionManager:
         """Background reconnection loop."""
         while self._running:
             now = time.time()
-            devices_to_retry: List[str] = []
-            
+            devices_to_retry: list[str] = []
+
             with self._lock:
                 for sensor_id, state in self._pending_devices.items():
                     if state.next_retry_time and now >= state.next_retry_time:
                         devices_to_retry.append(sensor_id)
-            
+
             for sensor_id in devices_to_retry:
                 self._attempt_reconnect(sensor_id)
-            
+
             time.sleep(1.0)  # Check every second
 
     def _attempt_reconnect(self, sensor_id: str) -> None:
         """Attempt to reconnect a device."""
         # Try a test poll
         value, timestamp, error = self._poller.poll_sensor(sensor_id)
-        
+
         if error is None:
             # Success! Device is back online
             with self._lock:
                 self._pending_devices.pop(sensor_id, None)
-            
+
             if self._on_device_recovered:
                 self._on_device_recovered(sensor_id)
         else:
@@ -522,12 +509,12 @@ class ModbusWorker(QThread):
         >>> worker.data_received.connect(on_data)
         >>> worker.start()
     """
-    
+
     # Legacy signals (for backward compatibility)
     data_received = pyqtSignal(float, float)  # (value, timestamp)
     error_occurred = pyqtSignal(str)
     connection_status = pyqtSignal(bool)  # True = connected
-    
+
     # Enhanced signals
     sensor_data_received = pyqtSignal(str, float, float)  # (sensor_id, value, timestamp)
     device_status_changed = pyqtSignal(str, str)  # (sensor_id, status)
@@ -535,7 +522,7 @@ class ModbusWorker(QThread):
 
     def __init__(
         self,
-        sensors: Optional[List[SensorConfig]] = None,
+        sensors: list[SensorConfig] | None = None,
         poll_interval: float = 1.0,
         buffer_size: int = 10000,
         # Legacy parameters for backward compatibility
@@ -567,7 +554,7 @@ class ModbusWorker(QThread):
                 slave_id, scale_factor, read_interval
         """
         super().__init__(parent)
-        
+
         # Initialize components
         self._logger = StructuredLogger("modbus_worker")
         self._poller = ModbusPoller()
@@ -577,14 +564,14 @@ class ModbusWorker(QThread):
             self._logger,
             on_device_recovered=self._on_device_recovered
         )
-        
+
         # State
         self._running = False
         self._poll_interval = poll_interval or read_interval
-        self._primary_sensor_id: Optional[str] = None
-        self._device_statuses: Dict[str, DeviceStatus] = {}
+        self._primary_sensor_id: str | None = None
+        self._device_statuses: dict[str, DeviceStatus] = {}
         self._status_lock = QMutex()
-        
+
         # Add sensors
         if sensors:
             for config in sensors:
@@ -624,7 +611,7 @@ class ModbusWorker(QThread):
     ) -> SensorConfig:
         """Create SensorConfig from legacy parameters."""
         conn_type = ConnectionType.TCP if connection_type.upper() == "TCP" else ConnectionType.RTU
-        
+
         return SensorConfig(
             name="legacy_sensor",
             connection_type=conn_type,
@@ -645,11 +632,11 @@ class ModbusWorker(QThread):
     def _add_sensor(self, config: SensorConfig) -> None:
         """Add a sensor to the poller."""
         self._poller.add_sensor(config)
-        
+
         # Set first sensor as primary (for legacy signal compatibility)
         if self._primary_sensor_id is None:
             self._primary_sensor_id = config.name
-        
+
         # Initialize status
         self._status_lock.lock()
         try:
@@ -690,39 +677,39 @@ class ModbusWorker(QThread):
         """Main worker loop - polls sensors continuously."""
         self._running = True
         self._reconnection_manager.start()
-        
+
         self._logger._emit("INFO", "worker_started", "system",
                           sensor_count=len(self._poller._sensors))
-        
+
         # Initial connection status
         self.connection_status.emit(True)
-        
+
         try:
             while self._running:
                 cycle_start = time.time()
-                
+
                 # Poll all sensors
                 results = self._poller.poll_all()
-                
+
                 # Process results
                 for sensor_id, (value, timestamp, error) in results.items():
                     self._process_result(sensor_id, value, timestamp, error)
-                
+
                 # Emit batch signal
                 if results:
                     self.batch_data_received.emit(results)
-                
+
                 # Calculate sleep time to maintain interval
                 elapsed = time.time() - cycle_start
                 sleep_time = max(0, self._poll_interval - elapsed)
-                
+
                 if sleep_time > 0:
                     # Use interruptible sleep
                     for _ in range(int(sleep_time * 10)):
                         if not self._running:
                             break
                         time.sleep(0.1)
-        
+
         except Exception as e:
             self._logger.log_critical_error(
                 "system",
@@ -730,32 +717,32 @@ class ModbusWorker(QThread):
                 str(e)
             )
             self.error_occurred.emit(f"Worker crashed: {e}")
-        
+
         finally:
             self._cleanup()
 
     def _process_result(
         self,
         sensor_id: str,
-        value: Optional[float],
+        value: float | None,
         timestamp: float,
-        error: Optional[str]
+        error: str | None
     ) -> None:
         """Process a poll result for a sensor."""
         config = self._poller._sensors.get(sensor_id)
         if not config:
             return
-        
+
         # Get current and new status
         new_status = self._poller.get_sensor_status(sensor_id)
-        
+
         self._status_lock.lock()
         try:
             old_status = self._device_statuses.get(sensor_id, DeviceStatus.UNKNOWN)
             self._device_statuses[sensor_id] = new_status
         finally:
             self._status_lock.unlock()
-        
+
         # Emit status change if changed
         if old_status != new_status:
             self.device_status_changed.emit(sensor_id, new_status.value)
@@ -764,29 +751,29 @@ class ModbusWorker(QThread):
                 old_status.value,
                 new_status.value
             )
-            
+
             # Handle offline devices
             if new_status == DeviceStatus.OFFLINE:
                 self._reconnection_manager.schedule_reconnect(sensor_id, config)
-        
+
         if error:
             # Error occurred
             cb = self._poller._circuit_breakers.get(sensor_id)
             failure_count = cb.failure_count if cb else 0
-            
+
             self._logger.log_read_error(sensor_id, error, failure_count)
-            
+
             # Emit error for primary sensor (legacy compatibility)
             if sensor_id == self._primary_sensor_id:
                 self.error_occurred.emit(error)
-        
+
         elif value is not None:
             # Success - store data
             self._data_buffer.write(sensor_id, value, timestamp)
-            
+
             # Emit signals
             self.sensor_data_received.emit(sensor_id, value, timestamp)
-            
+
             # Legacy signal for primary sensor
             if sensor_id == self._primary_sensor_id:
                 self.data_received.emit(value, timestamp)
@@ -794,14 +781,14 @@ class ModbusWorker(QThread):
     def _on_device_recovered(self, sensor_id: str) -> None:
         """Handle device recovery callback."""
         self._logger._emit("INFO", "device_recovered", sensor_id)
-        
+
         # Update status
         self._status_lock.lock()
         try:
             self._device_statuses[sensor_id] = DeviceStatus.ONLINE
         finally:
             self._status_lock.unlock()
-        
+
         self.device_status_changed.emit(sensor_id, DeviceStatus.ONLINE.value)
 
     def _cleanup(self) -> None:
@@ -809,20 +796,20 @@ class ModbusWorker(QThread):
         self._reconnection_manager.stop()
         self._poller.disconnect_all()
         self.connection_status.emit(False)
-        
+
         self._logger._emit("INFO", "worker_stopped", "system")
 
     def stop(self) -> None:
         """Stop the worker thread gracefully."""
         self._running = False
-        
+
         # Wait for thread to finish
         if self.isRunning():
             self.wait(5000)
 
     # --- Data Access Methods ---
 
-    def get_latest_value(self, sensor_id: str) -> Optional[Tuple[float, float]]:
+    def get_latest_value(self, sensor_id: str) -> tuple[float, float] | None:
         """
         Get the most recent value for a sensor.
         
@@ -837,8 +824,8 @@ class ModbusWorker(QThread):
     def get_data_buffer(
         self,
         sensor_id: str,
-        count: Optional[int] = None
-    ) -> List[Tuple[float, float]]:
+        count: int | None = None
+    ) -> list[tuple[float, float]]:
         """
         Get buffered data for a sensor.
         
@@ -869,7 +856,7 @@ class ModbusWorker(QThread):
         finally:
             self._status_lock.unlock()
 
-    def get_all_sensor_statuses(self) -> Dict[str, DeviceStatus]:
+    def get_all_sensor_statuses(self) -> dict[str, DeviceStatus]:
         """
         Get status of all sensors.
         
@@ -882,7 +869,7 @@ class ModbusWorker(QThread):
         finally:
             self._status_lock.unlock()
 
-    def get_status_summary(self) -> Dict[str, Any]:
+    def get_status_summary(self) -> dict[str, Any]:
         """
         Get complete status summary.
         
@@ -911,7 +898,7 @@ class ModbusWorker(QThread):
 
 # --- Utility Functions ---
 
-def list_available_ports() -> List[Tuple[str, str]]:
+def list_available_ports() -> list[tuple[str, str]]:
     """
     List available serial (COM) ports on the system.
     
@@ -939,7 +926,7 @@ class ModbusConnectionConfig:
     
     Deprecated: Use SensorConfig from models.py instead.
     """
-    
+
     def __init__(
         self,
         connection_type: str = "TCP",
@@ -964,7 +951,7 @@ class ModbusConnectionConfig:
             DeprecationWarning,
             stacklevel=2
         )
-        
+
         self.connection_type = connection_type
         self.ip_address = ip_address
         self.tcp_port = tcp_port
@@ -979,11 +966,11 @@ class ModbusConnectionConfig:
         self.data_type = data_type
         self.read_interval = read_interval
         self.name = name
-    
+
     def to_sensor_config(self) -> SensorConfig:
         """Convert to new SensorConfig format."""
         conn_type = ConnectionType.TCP if self.connection_type.upper() == "TCP" else ConnectionType.RTU
-        
+
         # Map legacy data_type string to enum
         data_type_map = {
             "float32_be": DataType.FLOAT32_BE,
@@ -998,7 +985,7 @@ class ModbusConnectionConfig:
             "uint32_le": DataType.UINT32_LE,
         }
         dt = data_type_map.get(self.data_type.lower(), DataType.FLOAT32_BE)
-        
+
         return SensorConfig(
             name=self.name,
             connection_type=conn_type,
@@ -1015,7 +1002,7 @@ class ModbusConnectionConfig:
             scale_factor=self.scale_factor,
             poll_interval=self.read_interval
         )
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary (legacy method)."""
         return {
@@ -1034,7 +1021,7 @@ class ModbusConnectionConfig:
             "read_interval": self.read_interval,
             "name": self.name
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> "ModbusConnectionConfig":
         """Create from dictionary (legacy method)."""

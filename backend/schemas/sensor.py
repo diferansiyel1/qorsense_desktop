@@ -13,19 +13,15 @@ Key Features:
 """
 
 from datetime import datetime
-from typing import Optional, List, Literal, Any
-from pydantic import (
-    BaseModel, 
-    Field, 
-    field_validator, 
-    model_validator,
-    ConfigDict,
-    StrictFloat,
-    StrictInt,
-    StrictStr,
-)
 from enum import Enum
+from typing import Any
 
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 # ========================================
 # Enumerations
@@ -96,13 +92,13 @@ class SensorReadingBase(BaseModel):
         le=1e9,   # Reasonable maximum for industrial sensors
         description="Measured sensor value"
     )
-    
+
     model_config = ConfigDict(
         str_strip_whitespace=True,
         validate_assignment=True,
         extra="forbid",  # Strict: reject unknown fields
     )
-    
+
     @field_validator('timestamp', mode='before')
     @classmethod
     def parse_timestamp(cls, v: Any) -> datetime:
@@ -125,10 +121,10 @@ class SensorReadingBase(BaseModel):
         """
         if isinstance(v, datetime):
             return v
-        
+
         if isinstance(v, str):
             v = v.strip()
-            
+
             # Handle common ISO8601 formats
             formats = [
                 "%Y-%m-%dT%H:%M:%S.%f%z",  # Full ISO with microseconds and TZ
@@ -139,25 +135,25 @@ class SensorReadingBase(BaseModel):
                 "%Y-%m-%d %H:%M:%S",       # Space separated
                 "%Y-%m-%d",                # Date only
             ]
-            
+
             for fmt in formats:
                 try:
                     return datetime.strptime(v, fmt)
                 except ValueError:
                     continue
-            
+
             # Try fromisoformat as last resort (Python 3.11+)
             try:
                 return datetime.fromisoformat(v.replace('Z', '+00:00'))
             except ValueError:
                 pass
-            
+
             raise ValueError(
                 f"Invalid timestamp format: '{v}'. "
                 f"Expected ISO8601 format (e.g., '2024-01-15T10:30:00', "
                 f"'2024-01-15T10:30:00.123456', '2024-01-15T10:30:00+03:00')"
             )
-        
+
         raise ValueError(f"Timestamp must be string or datetime, got {type(v).__name__}")
 
 
@@ -187,7 +183,7 @@ class SensorReadingBulk(BaseModel):
         sensor_id is not included here as it's provided at the upload level,
         not per-row in CSV files.
     """
-    timestamp: Optional[datetime] = Field(
+    timestamp: datetime | None = Field(
         default=None,
         description="Reading timestamp (optional, defaults to now)"
     )
@@ -197,15 +193,15 @@ class SensorReadingBulk(BaseModel):
         le=1e9,
         description="Measured sensor value"
     )
-    
+
     model_config = ConfigDict(
         str_strip_whitespace=True,
         extra="ignore",  # Allow extra columns in CSV
     )
-    
+
     @field_validator('timestamp', mode='before')
     @classmethod
-    def parse_optional_timestamp(cls, v: Any) -> Optional[datetime]:
+    def parse_optional_timestamp(cls, v: Any) -> datetime | None:
         """
         Parse timestamp with None handling for missing values.
         
@@ -217,10 +213,10 @@ class SensorReadingBulk(BaseModel):
         """
         if v is None or v == '' or (isinstance(v, str) and v.strip() == ''):
             return None
-        
+
         # Reuse the robust parser from SensorReadingBase
         return SensorReadingBase.parse_timestamp(v)
-    
+
     @field_validator('value', mode='before')
     @classmethod
     def parse_value(cls, v: Any) -> float:
@@ -243,7 +239,7 @@ class SensorReadingBulk(BaseModel):
         """
         if isinstance(v, (int, float)):
             return float(v)
-        
+
         if isinstance(v, str):
             v = v.strip()
             if v == '' or v.lower() in ('null', 'none', 'nan', 'na', '-'):
@@ -252,7 +248,7 @@ class SensorReadingBulk(BaseModel):
                 return float(v)
             except ValueError:
                 raise ValueError(f"Cannot parse '{v}' as numeric value")
-        
+
         raise ValueError(f"Value must be numeric, got {type(v).__name__}")
 
 
@@ -291,15 +287,15 @@ class SensorCreate(BaseModel):
         default=SourceType.CSV,
         description="Data source type"
     )
-    organization_id: Optional[int] = Field(
+    organization_id: int | None = Field(
         default=None,
         description="Organization ID for multi-tenant setups"
     )
-    config: Optional[dict] = Field(
+    config: dict | None = Field(
         default=None,
         description="Source-specific configuration (e.g., SCADA IP, IoT topic)"
     )
-    
+
     model_config = ConfigDict(
         str_strip_whitespace=True,
         extra="forbid",
@@ -326,11 +322,11 @@ class SensorResponse(BaseModel):
     name: str = Field(..., description="Sensor name")
     location: str = Field(..., description="Sensor location")
     source_type: SourceType = Field(..., description="Data source type")
-    organization_id: Optional[int] = Field(None, description="Organization ID")
+    organization_id: int | None = Field(None, description="Organization ID")
     latest_health_score: float = Field(100.0, ge=0, le=100, description="Latest health score")
     latest_status: str = Field("Normal", description="Current status")
-    latest_analysis_timestamp: Optional[datetime] = Field(None, description="Last analysis time")
-    
+    latest_analysis_timestamp: datetime | None = Field(None, description="Last analysis time")
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -365,7 +361,7 @@ class CSVImportConfig(BaseModel):
         default=1,
         description="Column index (0-based) or name for value"
     )
-    sensor_id_column: Optional[int | str] = Field(
+    sensor_id_column: int | str | None = Field(
         default=None,
         description="Optional column for sensor_id override"
     )
@@ -379,11 +375,11 @@ class CSVImportConfig(BaseModel):
         le=50000,
         description="Rows per processing chunk"
     )
-    date_format: Optional[str] = Field(
+    date_format: str | None = Field(
         default=None,
         description="Specific date format (e.g., '%Y-%m-%d %H:%M:%S')"
     )
-    
+
     model_config = ConfigDict(extra="forbid")
 
 
@@ -411,21 +407,21 @@ class CSVImportResult(BaseModel):
     imported_rows: int = Field(..., ge=0, description="Successfully imported")
     failed_rows: int = Field(..., ge=0, description="Failed validation")
     skipped_rows: int = Field(0, ge=0, description="Skipped rows (empty)")
-    error_samples: List[str] = Field(
+    error_samples: list[str] = Field(
         default_factory=list,
         max_length=10,
         description="Sample error messages (max 10)"
     )
     import_duration_ms: int = Field(..., ge=0, description="Processing time in ms")
     chunks_processed: int = Field(1, ge=1, description="Number of chunks")
-    
+
     @property
     def success_rate(self) -> float:
         """Calculate import success rate as percentage."""
         if self.total_rows == 0:
             return 0.0
         return (self.imported_rows / self.total_rows) * 100
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -436,10 +432,10 @@ class CSVValidationError(BaseModel):
     Used for comprehensive error reporting during import.
     """
     row_number: int = Field(..., ge=1, description="1-indexed row number")
-    column: Optional[str] = Field(None, description="Column name if applicable")
-    value: Optional[str] = Field(None, description="Invalid value")
+    column: str | None = Field(None, description="Column name if applicable")
+    value: str | None = Field(None, description="Invalid value")
     error: str = Field(..., description="Error description")
-    
+
     def __str__(self) -> str:
         if self.column:
             return f"Row {self.row_number}, Column '{self.column}': {self.error}"

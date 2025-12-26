@@ -3,19 +3,30 @@ Multi-Sensor Connection Dialog.
 
 Advanced dialog for configuring multiple Modbus sensors with shared connection parameters.
 """
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
-    QLabel, QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox,
-    QPushButton, QRadioButton, QButtonGroup, QStackedWidget,
-    QTableWidget, QTableWidgetItem, QHeaderView, QDialogButtonBox,
-    QMessageBox, QAbstractItemView
-)
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
-
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 from desktop_app.workers.live_worker import list_available_ports
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QButtonGroup,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QRadioButton,
+    QSpinBox,
+    QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+)
 
 
 class MultiSensorConnectionDialog(QDialog):
@@ -34,7 +45,7 @@ class MultiSensorConnectionDialog(QDialog):
         ...     connection_params = dialog.get_connection_params()
         ...     sensors = dialog.get_sensors()
     """
-    
+
     # Data types supported
     DATA_TYPES = [
         "FLOAT32_BE",      # Big Endian Float
@@ -46,96 +57,96 @@ class MultiSensorConnectionDialog(QDialog):
         "INT32_BE",
         "UINT32_BE",
     ]
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Multi-Sensor Connection")
         self.setMinimumSize(700, 500)
-        
-        self._sensors: List[Dict[str, Any]] = []
+
+        self._sensors: list[dict[str, Any]] = []
         self._setup_ui()
-    
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
-        
+
         # === Connection Type Selection ===
         conn_group = QGroupBox("Connection Type")
         conn_layout = QHBoxLayout(conn_group)
-        
+
         self.radio_tcp = QRadioButton("Modbus TCP")
         self.radio_rtu = QRadioButton("Modbus RTU")
         self.radio_tcp.setChecked(True)
-        
+
         self.conn_button_group = QButtonGroup(self)
         self.conn_button_group.addButton(self.radio_tcp, 0)
         self.conn_button_group.addButton(self.radio_rtu, 1)
-        
+
         conn_layout.addWidget(self.radio_tcp)
         conn_layout.addWidget(self.radio_rtu)
         conn_layout.addStretch()
         layout.addWidget(conn_group)
-        
+
         # === Connection Parameters ===
         self.conn_stack = QStackedWidget()
-        
+
         # TCP Page
         tcp_page = QGroupBox("TCP Connection")
         tcp_layout = QFormLayout(tcp_page)
-        
+
         self.ip_input = QLineEdit("127.0.0.1")
         self.ip_input.setPlaceholderText("192.168.1.100")
         tcp_layout.addRow("IP Address:", self.ip_input)
-        
+
         self.tcp_port_input = QSpinBox()
         self.tcp_port_input.setRange(1, 65535)
         self.tcp_port_input.setValue(5020)
         tcp_layout.addRow("Port:", self.tcp_port_input)
-        
+
         self.conn_stack.addWidget(tcp_page)
-        
+
         # RTU Page
         rtu_page = QGroupBox("RTU Connection")
         rtu_layout = QFormLayout(rtu_page)
-        
+
         # COM Port with refresh
         com_row = QHBoxLayout()
         self.com_port_combo = QComboBox()
         self._refresh_com_ports()
         com_row.addWidget(self.com_port_combo, 1)
-        
+
         btn_refresh = QPushButton("↻")
         btn_refresh.setFixedWidth(30)
         btn_refresh.clicked.connect(self._refresh_com_ports)
         com_row.addWidget(btn_refresh)
         rtu_layout.addRow("COM Port:", com_row)
-        
+
         self.baud_combo = QComboBox()
         self.baud_combo.addItems(["9600", "19200", "38400", "57600", "115200"])
         self.baud_combo.setCurrentText("19200")
         rtu_layout.addRow("Baud Rate:", self.baud_combo)
-        
+
         self.parity_combo = QComboBox()
         self.parity_combo.addItems(["None (N)", "Even (E)", "Odd (O)"])
         self.parity_combo.setCurrentIndex(0)
         rtu_layout.addRow("Parity:", self.parity_combo)
-        
+
         self.stopbits_combo = QComboBox()
         self.stopbits_combo.addItems(["1", "2"])
         self.stopbits_combo.setCurrentText("2")
         rtu_layout.addRow("Stop Bits:", self.stopbits_combo)
-        
+
         self.conn_stack.addWidget(rtu_page)
         layout.addWidget(self.conn_stack)
-        
+
         # Connect radio buttons
         self.radio_tcp.toggled.connect(lambda: self.conn_stack.setCurrentIndex(0))
         self.radio_rtu.toggled.connect(lambda: self.conn_stack.setCurrentIndex(1))
-        
+
         # === Sensor Table ===
         sensor_group = QGroupBox("Sensors")
         sensor_layout = QVBoxLayout(sensor_group)
-        
+
         # Table
         self.sensor_table = QTableWidget(0, 8)
         self.sensor_table.setHorizontalHeaderLabels([
@@ -153,7 +164,7 @@ class MultiSensorConnectionDialog(QDialog):
         self.sensor_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.sensor_table.setAlternatingRowColors(True)
         sensor_layout.addWidget(self.sensor_table)
-        
+
         # Add Sensor Button
         btn_row = QHBoxLayout()
         btn_add = QPushButton("+ Add Sensor")
@@ -161,12 +172,12 @@ class MultiSensorConnectionDialog(QDialog):
         btn_row.addWidget(btn_add)
         btn_row.addStretch()
         sensor_layout.addLayout(btn_row)
-        
+
         layout.addWidget(sensor_group, 1)
-        
+
         # Add default sensor
         self._add_sensor_row()
-        
+
         # === Buttons ===
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -174,7 +185,7 @@ class MultiSensorConnectionDialog(QDialog):
         button_box.accepted.connect(self._validate_and_accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
-    
+
     def _refresh_com_ports(self):
         """Refresh available COM ports."""
         self.com_port_combo.clear()
@@ -185,63 +196,63 @@ class MultiSensorConnectionDialog(QDialog):
                 self.com_port_combo.addItem(display, port_name)
         else:
             self.com_port_combo.addItem("No ports found", "")
-    
+
     def _add_sensor_row(self):
         """Add a new sensor row to the table."""
         row = self.sensor_table.rowCount()
         self.sensor_table.insertRow(row)
-        
+
         # Name
         name_item = QTableWidgetItem(f"Sensor_{row+1}")
         self.sensor_table.setItem(row, 0, name_item)
-        
+
         # Slave ID (Unit ID)
         slave_spin = QSpinBox()
         slave_spin.setRange(1, 247)  # Modbus slave ID range: 1-247
         slave_spin.setValue(1)  # Default slave ID
         slave_spin.setToolTip("Modbus Slave/Unit ID (1-247)")
         self.sensor_table.setCellWidget(row, 1, slave_spin)
-        
+
         # Register Address
         reg_spin = QSpinBox()
         reg_spin.setRange(0, 65535)
         reg_spin.setValue(2089)  # Default: Hamilton/EasyFerm PMC1 register
         reg_spin.setToolTip("Starting register address")
         self.sensor_table.setCellWidget(row, 2, reg_spin)
-        
+
         # Register Count
         count_spin = QSpinBox()
         count_spin.setRange(1, 125)
         count_spin.setValue(10)  # Default: Hamilton sensors read 10 registers
         count_spin.setToolTip("Number of registers to read (Hamilton: 10)")
         self.sensor_table.setCellWidget(row, 3, count_spin)
-        
+
         # Value Offset
         offset_spin = QSpinBox()
         offset_spin.setRange(0, 20)
         offset_spin.setValue(2)  # Default: Hamilton value starts at offset 2
         offset_spin.setToolTip("Register offset where value starts (Hamilton: 2)")
         self.sensor_table.setCellWidget(row, 4, offset_spin)
-        
+
         # Data Type
         type_combo = QComboBox()
         type_combo.addItems(self.DATA_TYPES)
         type_combo.setCurrentText("FLOAT32_WS")  # Default: Hamilton uses Word Swapped
         self.sensor_table.setCellWidget(row, 5, type_combo)
-        
+
         # Scale Factor
         scale_spin = QDoubleSpinBox()
         scale_spin.setRange(0.0001, 10000)
         scale_spin.setValue(1.0)
         scale_spin.setDecimals(4)
         self.sensor_table.setCellWidget(row, 6, scale_spin)
-        
+
         # Remove Button
         btn_remove = QPushButton("✖")
         btn_remove.setFixedWidth(40)
         btn_remove.clicked.connect(lambda: self._remove_sensor_row(row))
         self.sensor_table.setCellWidget(row, 7, btn_remove)
-    
+
     def _remove_sensor_row(self, row: int):
         """Remove sensor row."""
         if self.sensor_table.rowCount() <= 1:
@@ -254,14 +265,14 @@ class MultiSensorConnectionDialog(QDialog):
             if btn:
                 btn.clicked.disconnect()
                 btn.clicked.connect(lambda checked, row=r: self._remove_sensor_row(row))
-    
+
     def _validate_and_accept(self):
         """Validate inputs and accept dialog."""
         # Check for valid sensors
         if self.sensor_table.rowCount() == 0:
             QMessageBox.warning(self, "Validation Error", "Add at least one sensor.")
             return
-        
+
         # Check for duplicate names
         names = set()
         for row in range(self.sensor_table.rowCount()):
@@ -274,31 +285,30 @@ class MultiSensorConnectionDialog(QDialog):
                 QMessageBox.warning(self, "Validation Error", f"Duplicate sensor name: {name}")
                 return
             names.add(name)
-        
+
         self.accept()
-    
+
     def get_connection_type(self) -> str:
         """Return 'TCP' or 'RTU'."""
         return "TCP" if self.radio_tcp.isChecked() else "RTU"
-    
-    def get_connection_params(self) -> Dict[str, Any]:
+
+    def get_connection_params(self) -> dict[str, Any]:
         """Return connection parameters."""
         if self.radio_tcp.isChecked():
             return {
                 "ip_address": self.ip_input.text(),
                 "tcp_port": self.tcp_port_input.value()
             }
-        else:
-            parity_map = {"None (N)": "N", "Even (E)": "E", "Odd (O)": "O"}
-            return {
-                "serial_port": self.com_port_combo.currentData() or self.com_port_combo.currentText().split(" - ")[0],
-                "baudrate": int(self.baud_combo.currentText()),
-                "parity": parity_map.get(self.parity_combo.currentText(), "N"),
-                "stopbits": int(self.stopbits_combo.currentText()),
-                "bytesize": 8
-            }
-    
-    def get_sensors(self) -> List[Dict[str, Any]]:
+        parity_map = {"None (N)": "N", "Even (E)": "E", "Odd (O)": "O"}
+        return {
+            "serial_port": self.com_port_combo.currentData() or self.com_port_combo.currentText().split(" - ")[0],
+            "baudrate": int(self.baud_combo.currentText()),
+            "parity": parity_map.get(self.parity_combo.currentText(), "N"),
+            "stopbits": int(self.stopbits_combo.currentText()),
+            "bytesize": 8
+        }
+
+    def get_sensors(self) -> list[dict[str, Any]]:
         """
         Return list of sensor configurations.
         
@@ -314,7 +324,7 @@ class MultiSensorConnectionDialog(QDialog):
             offset_widget = self.sensor_table.cellWidget(row, 4)
             type_widget = self.sensor_table.cellWidget(row, 5)
             scale_widget = self.sensor_table.cellWidget(row, 6)
-            
+
             sensors.append({
                 "name": name_item.text().strip() if name_item else f"Sensor_{row+1}",
                 "slave_id": slave_widget.value() if slave_widget else 1,

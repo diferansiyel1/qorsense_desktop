@@ -6,7 +6,6 @@ Modbus data types. Provides a unified interface for decoding raw
 register values into typed Python values.
 """
 import struct
-from typing import List, Union
 
 from .models import DataType
 
@@ -32,7 +31,7 @@ class ModbusDecoder:
     """
 
     @staticmethod
-    def decode(registers: List[int], data_type: DataType) -> Union[float, int]:
+    def decode(registers: list[int], data_type: DataType) -> float | int:
         """
         Decode Modbus register values to a typed Python value.
         
@@ -59,7 +58,7 @@ class ModbusDecoder:
         # Single register types (16-bit)
         if data_type == DataType.INT16:
             return ModbusDecoder._decode_int16(registers[0])
-        elif data_type == DataType.UINT16:
+        if data_type == DataType.UINT16:
             return ModbusDecoder._decode_uint16(registers[0])
 
         # Two-register types (32-bit)
@@ -68,22 +67,21 @@ class ModbusDecoder:
 
         if data_type == DataType.FLOAT32_BE:
             return ModbusDecoder._decode_float32_be(registers)
-        elif data_type == DataType.FLOAT32_LE:
+        if data_type == DataType.FLOAT32_LE:
             return ModbusDecoder._decode_float32_le(registers)
-        elif data_type == DataType.FLOAT32_BS:
+        if data_type == DataType.FLOAT32_BS:
             return ModbusDecoder._decode_float32_bs(registers)
-        elif data_type == DataType.FLOAT32_WS:
+        if data_type == DataType.FLOAT32_WS:
             return ModbusDecoder._decode_float32_ws(registers)
-        elif data_type == DataType.INT32_BE:
+        if data_type == DataType.INT32_BE:
             return ModbusDecoder._decode_int32_be(registers)
-        elif data_type == DataType.INT32_LE:
+        if data_type == DataType.INT32_LE:
             return ModbusDecoder._decode_int32_le(registers)
-        elif data_type == DataType.UINT32_BE:
+        if data_type == DataType.UINT32_BE:
             return ModbusDecoder._decode_uint32_be(registers)
-        elif data_type == DataType.UINT32_LE:
+        if data_type == DataType.UINT32_LE:
             return ModbusDecoder._decode_uint32_le(registers)
-        else:
-            raise ValueError(f"Unsupported data type: {data_type}")
+        raise ValueError(f"Unsupported data type: {data_type}")
 
     # --- 16-bit Decoders ---
 
@@ -117,7 +115,7 @@ class ModbusDecoder:
     # --- 32-bit Float Decoders ---
 
     @staticmethod
-    def _decode_float32_be(registers: List[int]) -> float:
+    def _decode_float32_be(registers: list[int]) -> float:
         """
         Decode two registers as Big-Endian Float32 (ABCD order).
         
@@ -136,7 +134,7 @@ class ModbusDecoder:
         return struct.unpack(">f", packed)[0]
 
     @staticmethod
-    def _decode_float32_le(registers: List[int]) -> float:
+    def _decode_float32_le(registers: list[int]) -> float:
         """
         Decode two registers as Little-Endian Float32 (DCBA order).
         
@@ -154,7 +152,7 @@ class ModbusDecoder:
         return struct.unpack("<f", packed)[0]
 
     @staticmethod
-    def _decode_float32_bs(registers: List[int]) -> float:
+    def _decode_float32_bs(registers: list[int]) -> float:
         """
         Decode two registers as Byte-Swapped Float32 (BADC order).
         
@@ -174,7 +172,7 @@ class ModbusDecoder:
         return struct.unpack(">f", packed)[0]
 
     @staticmethod
-    def _decode_float32_ws(registers: List[int]) -> float:
+    def _decode_float32_ws(registers: list[int]) -> float:
         """
         Decode two registers as Word-Swapped Float32 (CDAB order).
         
@@ -195,7 +193,7 @@ class ModbusDecoder:
     # --- 32-bit Integer Decoders ---
 
     @staticmethod
-    def _decode_int32_be(registers: List[int]) -> int:
+    def _decode_int32_be(registers: list[int]) -> int:
         """
         Decode two registers as Big-Endian signed 32-bit integer.
         
@@ -211,7 +209,7 @@ class ModbusDecoder:
         return struct.unpack(">i", packed)[0]
 
     @staticmethod
-    def _decode_int32_le(registers: List[int]) -> int:
+    def _decode_int32_le(registers: list[int]) -> int:
         """
         Decode two registers as Little-Endian signed 32-bit integer.
         
@@ -227,7 +225,7 @@ class ModbusDecoder:
         return struct.unpack("<i", packed)[0]
 
     @staticmethod
-    def _decode_uint32_be(registers: List[int]) -> int:
+    def _decode_uint32_be(registers: list[int]) -> int:
         """
         Decode two registers as Big-Endian unsigned 32-bit integer.
         
@@ -243,7 +241,7 @@ class ModbusDecoder:
         return struct.unpack(">I", packed)[0]
 
     @staticmethod
-    def _decode_uint32_le(registers: List[int]) -> int:
+    def _decode_uint32_le(registers: list[int]) -> int:
         """
         Decode two registers as Little-Endian unsigned 32-bit integer.
         
@@ -279,7 +277,7 @@ class ModbusDecoder:
         return (low_byte << 8) | high_byte
 
     @staticmethod
-    def _swap_words(registers: List[int]) -> List[int]:
+    def _swap_words(registers: list[int]) -> list[int]:
         """
         Swap two 16-bit words in a list.
         
@@ -312,7 +310,7 @@ class ModbusDecoder:
         return 2  # All 32-bit types require 2 registers
 
     @staticmethod
-    def format_registers(registers: List[int]) -> str:
+    def format_registers(registers: list[int]) -> str:
         """
         Format registers as hex string for logging.
         

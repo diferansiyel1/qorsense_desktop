@@ -14,28 +14,24 @@ Performance:
 - DFA vectorization provides ~10x speedup over loop-based implementation
 - All core calculations use NumPy broadcasting for efficiency
 """
+import logging
+from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 import pandas as pd
-from numpy.typing import NDArray
-from scipy import stats, signal
-from typing import Dict, Any, List, Tuple, Optional, Union
-from dataclasses import dataclass
-import logging
-from datetime import datetime
-from enum import Enum
-
 from backend.models import (
-    SensorConfig,
-    SensorLimitConfig,
     AnalysisErrorCode,
-    AnalysisInput,
     BiasResult,
     DFAResult,
-    HysteresisResult,
     HealthResult,
+    HysteresisResult,
+    SensorConfig,
+    SensorLimitConfig,
     get_sensor_limits,
-    SENSOR_LIMIT_PRESETS
 )
+from numpy.typing import NDArray
+from scipy import signal, stats
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +53,10 @@ class AnalysisOutput:
     """Complete analysis output with error handling."""
     success: bool
     error_code: AnalysisErrorCode
-    error_message: Optional[str]
-    metrics: Optional[Dict[str, Any]]
-    health: Optional[Dict[str, Any]]
-    prediction: Optional[str]
+    error_message: str | None
+    metrics: dict[str, Any] | None
+    health: dict[str, Any] | None
+    prediction: str | None
 
 
 # =============================================================================
@@ -106,8 +102,8 @@ class SensorAnalyzer:
 
     def __init__(
         self,
-        config: Optional[SensorConfig] = None,
-        limit_config: Optional[SensorLimitConfig] = None,
+        config: SensorConfig | None = None,
+        limit_config: SensorLimitConfig | None = None,
         sensor_type: str = "Generic"
     ):
         """
@@ -120,7 +116,7 @@ class SensorAnalyzer:
         """
         # Legacy config support
         self.config = config or SensorConfig()
-        
+
         # New limit config (takes precedence)
         if limit_config is not None:
             self.limit_config = limit_config
@@ -133,7 +129,7 @@ class SensorAnalyzer:
     # PREPROCESSING
     # =========================================================================
 
-    def preprocessing(self, data: List[float]) -> FloatArray:
+    def preprocessing(self, data: list[float]) -> FloatArray:
         """
         Preprocessing pipeline with validation.
         
@@ -158,9 +154,9 @@ class SensorAnalyzer:
                 f"Insufficient data: {len(data)} points provided, "
                 f"minimum {self.limit_config.min_data_points} required."
             )
-        
+
         arr = np.array(data, dtype=np.float64)
-        
+
         # Handle NaN values (replace with interpolation)
         nan_mask = np.isnan(arr)
         if np.any(nan_mask):
@@ -170,7 +166,7 @@ class SensorAnalyzer:
             # Interpolate NaN values
             s = pd.Series(arr)
             arr = s.interpolate(method='linear', limit=5).bfill().ffill().values
-        
+
         # Handle Inf values (clamp to reasonable range)
         inf_mask = np.isinf(arr)
         if np.any(inf_mask):
@@ -182,19 +178,19 @@ class SensorAnalyzer:
             if len(valid) > 0:
                 low, high = np.percentile(valid, [1, 99])
                 arr = np.clip(arr, low, high)
-        
+
         # Interpolation for gaps
         s = pd.Series(arr)
         s = s.interpolate(method='linear', limit=5).bfill().ffill()
-        
+
         # Median filter for spike removal
         kernel_size = min(5, len(arr) - 1)
         if kernel_size % 2 == 0:
             kernel_size -= 1
         kernel_size = max(3, kernel_size)
-        
+
         s_clean = signal.medfilt(s.values, kernel_size=kernel_size)
-        
+
         return s_clean.astype(np.float64)
 
     # =========================================================================
@@ -204,7 +200,7 @@ class SensorAnalyzer:
     def calc_bias(
         self,
         data: FloatArray,
-        reference_value: Optional[float] = None,
+        reference_value: float | None = None,
         window_fraction: float = 0.1
     ) -> BiasResult:
         """
@@ -224,27 +220,27 @@ class SensorAnalyzer:
         """
         if len(data) < 10:
             return BiasResult(absolute=0.0, relative=0.0, reference=0.0)
-        
+
         n_window = max(1, int(len(data) * window_fraction))
-        
+
         # Determine reference
         if reference_value is not None:
             reference = reference_value
         else:
             reference = float(np.mean(data[:n_window]))
-        
+
         # Current value (end window mean)
         current = float(np.mean(data[-n_window:]))
-        
+
         # Calculate bias
         absolute_bias = current - reference
-        
+
         # Relative bias (percentage)
         if abs(reference) > 1e-10:
             relative_bias = (absolute_bias / abs(reference)) * 100.0
         else:
             relative_bias = 0.0 if abs(absolute_bias) < 1e-10 else float('inf')
-        
+
         return BiasResult(
             absolute=round(absolute_bias, 6),
             relative=round(relative_bias, 4),
@@ -267,21 +263,21 @@ class SensorAnalyzer:
         """
         if len(data) < 2:
             return 0.0
-        
+
         n = len(data)
         x = np.arange(n, dtype=np.float64)
-        
+
         # Vectorized linear regression
         x_mean = (n - 1) / 2.0
         y_mean = np.mean(data)
-        
+
         # Slope = Σ(x-x̄)(y-ȳ) / Σ(x-x̄)²
         numerator = np.sum((x - x_mean) * (data - y_mean))
         denominator = np.sum((x - x_mean) ** 2)
-        
+
         if abs(denominator) < 1e-10:
             return 0.0
-        
+
         return float(numerator / denominator)
 
     # =========================================================================
@@ -303,27 +299,27 @@ class SensorAnalyzer:
         """
         if len(data) < 2:
             return 0.0
-        
+
         # Signal amplitude (robust percentile range)
         signal_pp = float(np.percentile(data, 95) - np.percentile(data, 5))
         if signal_pp < 1e-10:
             signal_pp = 1e-10
-        
+
         # Noise (RMS of detrended residuals)
         x = np.arange(len(data), dtype=np.float64)
         slope = self.calc_slope(data)
         intercept = np.mean(data) - slope * np.mean(x)
         trend = slope * x + intercept
-        
+
         noise_component = data - trend
         noise_rms = float(np.sqrt(np.mean(noise_component ** 2)))
-        
+
         if noise_rms < 1e-10:
             noise_rms = 1e-10
-        
+
         # SNR in dB
         snr_db = 20.0 * np.log10(signal_pp / noise_rms)
-        
+
         return round(float(snr_db), 2)
 
     # =========================================================================
@@ -349,41 +345,41 @@ class SensorAnalyzer:
         """
         if len(data) < 5:
             return HysteresisResult(score=0.0, rising_values=[], falling_values=[])
-        
+
         # Smooth for edge detection
         window = min(5, len(data))
         smooth = pd.Series(data).rolling(window=window, center=True).mean()
         smooth = smooth.bfill().ffill().values
-        
+
         diffs = np.diff(smooth)
-        
+
         # Threshold for significant movement
         threshold = np.std(diffs) * 0.5
         if threshold < 1e-10:
             return HysteresisResult(score=0.0, rising_values=[], falling_values=[])
-        
+
         rising_mask = diffs > threshold
         falling_mask = diffs < -threshold
-        
+
         if not np.any(rising_mask) or not np.any(falling_mask):
             return HysteresisResult(score=0.0, rising_values=[], falling_values=[])
-        
+
         rising_indices = np.where(rising_mask)[0]
         falling_indices = np.where(falling_mask)[0]
-        
+
         rising_values = data[rising_indices].tolist()
         falling_values = data[falling_indices].tolist()
-        
+
         avg_rising = np.mean(data[rising_indices])
         avg_falling = np.mean(data[falling_indices])
-        
+
         # Normalize by data range
         data_range = float(np.ptp(data))
         if data_range < 1e-10:
             data_range = 1.0
-        
+
         hysteresis_score = abs(avg_rising - avg_falling) / data_range
-        
+
         return HysteresisResult(
             score=round(float(hysteresis_score), 4),
             rising_values=rising_values,
@@ -424,16 +420,16 @@ class SensorAnalyzer:
         try:
             if len(data) < 20:
                 return DFAResult(hurst=0.5, r_squared=0.0, scales=[], fluctuations=[])
-            
+
             # Cumulative sum (integration)
             y = np.cumsum(data - np.mean(data))
             N = len(y)
-            
+
             # Determine scale range
             max_scale = N // 4
             if max_scale < min_scale:
                 return DFAResult(hurst=0.5, r_squared=0.0, scales=[], fluctuations=[])
-            
+
             # Generate log-spaced scales
             scales = np.unique(
                 np.logspace(
@@ -443,37 +439,37 @@ class SensorAnalyzer:
                 ).astype(np.int64)
             )
             scales = scales[scales > order + 2]
-            
+
             if len(scales) < 2:
                 return DFAResult(hurst=0.5, r_squared=0.0, scales=[], fluctuations=[])
-            
+
             fluctuations = np.zeros(len(scales), dtype=np.float64)
-            
+
             # Vectorized DFA calculation
             for i, scale in enumerate(scales):
                 fluctuations[i] = self._calc_fluctuation_vectorized(y, int(scale), order)
-            
+
             # Filter valid fluctuations
             valid_mask = fluctuations > 1e-10
             if np.sum(valid_mask) < 2:
                 return DFAResult(hurst=0.5, r_squared=0.0, scales=[], fluctuations=[])
-            
+
             valid_scales = scales[valid_mask]
             valid_flucts = fluctuations[valid_mask]
-            
+
             # Log-log linear regression
             log_scales = np.log(valid_scales.astype(np.float64))
             log_flucts = np.log(valid_flucts)
-            
+
             slope, intercept, r_value, _, _ = stats.linregress(log_scales, log_flucts)
-            
+
             return DFAResult(
                 hurst=round(float(slope), 4),
                 r_squared=round(float(r_value ** 2), 4),
                 scales=valid_scales.tolist(),
                 fluctuations=valid_flucts.tolist()
             )
-            
+
         except Exception as e:
             logger.warning(f"DFA calculation error: {e}")
             return DFAResult(hurst=0.5, r_squared=0.0, scales=[], fluctuations=[])
@@ -499,39 +495,39 @@ class SensorAnalyzer:
         """
         N = len(y)
         n_segments = N // scale
-        
+
         if n_segments < 1:
             return 0.0
-        
+
         # Reshape into segments
         segments = y[:n_segments * scale].reshape(n_segments, scale)
-        
+
         # Create Vandermonde matrix for polynomial fitting
         x = np.arange(scale, dtype=np.float64)
         V = np.vander(x, order + 1)
-        
+
         # Solve least squares for all segments at once
         # segments: (n_segments, scale)
         # V: (scale, order+1)
         # We need: V @ coeffs = segments.T
         # So coeffs = (V.T @ V)^-1 @ V.T @ segments.T
-        
+
         try:
             # Use numpy's lstsq for numerical stability
             # Transpose segments so each column is a segment
             coeffs, _, _, _ = np.linalg.lstsq(V, segments.T, rcond=None)
-            
+
             # Calculate trends for all segments
             trends = V @ coeffs  # (scale, n_segments)
-            
+
             # Residuals
             residuals = segments.T - trends  # (scale, n_segments)
-            
+
             # RMS fluctuation
             rms = np.sqrt(np.mean(residuals ** 2))
-            
+
             return float(rms)
-            
+
         except np.linalg.LinAlgError:
             # Fallback to non-vectorized for numerical issues
             total_residual_sq = 0.0
@@ -539,7 +535,7 @@ class SensorAnalyzer:
                 coeffs = np.polyfit(x, seg, order)
                 trend = np.polyval(coeffs, x)
                 total_residual_sq += np.sum((seg - trend) ** 2)
-            
+
             return float(np.sqrt(total_residual_sq / (n_segments * scale)))
 
     # =========================================================================
@@ -549,7 +545,7 @@ class SensorAnalyzer:
     def decompose_signal(
         self,
         data: FloatArray
-    ) -> Tuple[FloatArray, FloatArray]:
+    ) -> tuple[FloatArray, FloatArray]:
         """
         Decompose signal into trend and residuals.
         
@@ -564,16 +560,16 @@ class SensorAnalyzer:
         """
         if len(data) < self.limit_config.min_data_points:
             return data, np.zeros_like(data)
-        
+
         # Adaptive window length (odd, max 51)
         window_length = min(len(data), 51)
         if window_length % 2 == 0:
             window_length -= 1
         window_length = max(3, window_length)
-        
+
         # Polynomial order
         polyorder = min(3, window_length - 1)
-        
+
         try:
             trend = signal.savgol_filter(data, window_length, polyorder)
         except Exception as e:
@@ -582,9 +578,9 @@ class SensorAnalyzer:
             if kernel % 2 == 0:
                 kernel -= 1
             trend = signal.medfilt(data, kernel_size=kernel)
-        
+
         residuals = data - trend
-        
+
         return trend.astype(np.float64), residuals.astype(np.float64)
 
     # =========================================================================
@@ -593,8 +589,8 @@ class SensorAnalyzer:
 
     def get_health_score(
         self,
-        metrics: Dict[str, Any],
-        config: Optional[SensorLimitConfig] = None
+        metrics: dict[str, Any],
+        config: SensorLimitConfig | None = None
     ) -> HealthResult:
         """
         Calculate health score using configuration-driven thresholds.
@@ -615,20 +611,20 @@ class SensorAnalyzer:
             HealthResult with score, status, diagnosis, flags, and penalties
         """
         cfg = config or self.limit_config
-        
+
         score = 100.0
-        diagnosis: List[str] = []
-        flags: List[str] = []
-        penalties: Dict[str, float] = {}
+        diagnosis: list[str] = []
+        flags: list[str] = []
+        penalties: dict[str, float] = {}
         recommendation = "System operating normally."
-        
+
         # Extract metrics with defaults
         slope = abs(metrics.get("slope", 0))
         noise_std = metrics.get("noise_std", 0)
         snr_db = metrics.get("snr_db", 50)
         hurst = metrics.get("hurst", 0.5)
         hysteresis = metrics.get("hysteresis", 0)
-        
+
         # Get bias - support both old and new format
         bias_result = metrics.get("bias_result")
         if bias_result and isinstance(bias_result, dict):
@@ -637,7 +633,7 @@ class SensorAnalyzer:
             bias = abs(bias_result.absolute)
         else:
             bias = abs(metrics.get("bias", 0))
-        
+
         # --- SLOPE (Drift) Penalties ---
         if slope > cfg.slope_critical:
             penalty = 25.0 * cfg.weight_slope
@@ -653,7 +649,7 @@ class SensorAnalyzer:
                 recommendation = "Sensor calibration required!"
             score -= penalty
             penalties["slope_critical"] = penalty
-            
+
         elif slope > cfg.slope_warning:
             penalty = 15.0 * cfg.weight_slope
             score -= penalty
@@ -661,7 +657,7 @@ class SensorAnalyzer:
             diagnosis.append("Moderate Drift")
             flags.append("DRIFT")
             recommendation = "Monitor sensor, drift detected."
-        
+
         # --- BIAS (Offset) Penalties ---
         if bias > cfg.bias_critical:
             penalty = 20.0 * cfg.weight_bias
@@ -670,14 +666,14 @@ class SensorAnalyzer:
             diagnosis.append(f"Critical Bias (Δ={bias:.2f})")
             flags.append("CRITICAL_BIAS")
             recommendation = "Sensor reset or replacement required."
-            
+
         elif bias > cfg.bias_warning:
             penalty = 10.0 * cfg.weight_bias
             score -= penalty
             penalties["bias_warning"] = penalty
             diagnosis.append(f"Bias Warning (Δ={bias:.2f})")
             flags.append("BIAS")
-        
+
         # --- NOISE Penalties ---
         if noise_std > cfg.noise_critical:
             penalty = 20.0 * cfg.weight_noise
@@ -686,14 +682,14 @@ class SensorAnalyzer:
             diagnosis.append(f"High Noise (σ={noise_std:.2f})")
             flags.append("HIGH_NOISE")
             recommendation = "Check noise source."
-            
+
         elif noise_std > cfg.noise_warning:
             penalty = 10.0 * cfg.weight_noise
             score -= penalty
             penalties["noise_warning"] = penalty
             diagnosis.append(f"Elevated Noise (σ={noise_std:.2f})")
             flags.append("NOISE")
-        
+
         # --- SNR Penalties ---
         if snr_db < cfg.snr_critical:
             penalty = 15.0
@@ -701,14 +697,14 @@ class SensorAnalyzer:
             penalties["snr_critical"] = penalty
             diagnosis.append(f"Very Low SNR ({snr_db:.1f} dB)")
             flags.append("CRITICAL_SNR")
-            
+
         elif snr_db < cfg.snr_warning:
             penalty = 5.0
             score -= penalty
             penalties["snr_warning"] = penalty
             diagnosis.append(f"Low SNR ({snr_db:.1f} dB)")
             flags.append("LOW_SNR")
-        
+
         # --- DFA/Hurst Penalties ---
         if hurst > cfg.hurst_upper_critical:
             penalty = 30.0 * cfg.weight_hurst
@@ -717,14 +713,14 @@ class SensorAnalyzer:
             diagnosis.append(f"Strong Persistence (H={hurst:.2f})")
             flags.append("PERSISTENCE")
             recommendation = "Sensor correlation anomaly - maintenance required."
-            
+
         elif hurst < cfg.hurst_lower_warning:
             penalty = 10.0 * cfg.weight_hurst
             score -= penalty
             penalties["hurst_low"] = penalty
             diagnosis.append(f"Anti-persistence (H={hurst:.2f})")
             flags.append("ANTI_PERSISTENCE")
-        
+
         # --- Hysteresis Penalties ---
         if hysteresis > cfg.hysteresis_critical:
             penalty = 15.0
@@ -732,10 +728,10 @@ class SensorAnalyzer:
             penalties["hysteresis"] = penalty
             diagnosis.append(f"Significant Hysteresis ({hysteresis:.2f})")
             flags.append("HYSTERESIS")
-        
+
         # Clamp score
         score = max(0.0, min(100.0, score))
-        
+
         # Determine status
         if score < 60:
             status = "Red"
@@ -743,11 +739,11 @@ class SensorAnalyzer:
             status = "Yellow"
         else:
             status = "Green"
-        
+
         # Default diagnosis if none
         if not diagnosis:
             diagnosis.append("System Normal")
-        
+
         return HealthResult(
             score=round(score, 1),
             status=status,  # type: ignore
@@ -765,7 +761,7 @@ class SensorAnalyzer:
         self,
         trend: FloatArray,
         slope: float,
-        reference_value: Optional[float] = None
+        reference_value: float | None = None
     ) -> str:
         """
         Calculate Remaining Useful Life based on trend projection.
@@ -783,41 +779,40 @@ class SensorAnalyzer:
         """
         if abs(slope) < 1e-6:
             return "Stable (> 1 year)"
-        
+
         if len(trend) == 0:
             return "Unknown"
-        
+
         # Current value
         current_val = trend[-1] if len(trend) > 0 else 0
         initial_val = reference_value if reference_value is not None else trend[0]
-        
+
         # Critical thresholds
         upper_limit = initial_val + self.limit_config.bias_critical
         lower_limit = initial_val - self.limit_config.bias_critical
-        
+
         if slope > 0:
             distance = upper_limit - current_val
         else:
             distance = current_val - lower_limit
-        
+
         if distance <= 0:
             return "Critical Threshold Exceeded"
-        
+
         # Time steps remaining
         steps = distance / abs(slope)
-        
+
         # Convert to human-readable format
         if steps > 3600 * 24 * 365:
             return "Stable (> 1 year)"
-        elif steps > 3600 * 24:
+        if steps > 3600 * 24:
             days = int(steps / (3600 * 24))
             return f"{days} days"
-        elif steps > 3600:
+        if steps > 3600:
             hours = int(steps / 3600)
             return f"{hours} hours"
-        else:
-            mins = int(steps / 60)
-            return f"{mins} mins"
+        mins = int(steps / 60)
+        return f"{mins} mins"
 
     # =========================================================================
     # MAIN ANALYSIS PIPELINE
@@ -825,10 +820,10 @@ class SensorAnalyzer:
 
     def analyze(
         self,
-        raw_data: List[float],
-        reference_value: Optional[float] = None,
-        sensor_type: Optional[str] = None
-    ) -> Dict[str, Any]:
+        raw_data: list[float],
+        reference_value: float | None = None,
+        sensor_type: str | None = None
+    ) -> dict[str, Any]:
         """
         Complete analysis pipeline with robust error handling.
         
@@ -858,35 +853,35 @@ class SensorAnalyzer:
         # Update config if sensor_type provided
         if sensor_type:
             self.limit_config = get_sensor_limits(sensor_type)
-        
+
         try:
             # 1. Preprocessing
             clean_data = self.preprocessing(raw_data)
-            
+
             # 2. Signal decomposition
             trend, residuals = self.decompose_signal(clean_data)
-            
+
             # 3. Calculate metrics
             # Bias (with reference if provided)
             bias_result = self.calc_bias(clean_data, reference_value=reference_value)
-            
+
             # Slope (on trend)
             slope = self.calc_slope(trend)
-            
+
             # Noise (on residuals)
             noise_std = float(np.std(residuals))
-            
+
             # SNR
             snr_db = self.calc_snr_db(clean_data)
-            
+
             # DFA (on residuals - detrended)
             dfa_result = self.calc_dfa(residuals)
-            
+
             # Hysteresis
             hyst_result = self.calc_hysteresis(clean_data)
-            
+
             # Build metrics dictionary
-            metrics_dict: Dict[str, Any] = {
+            metrics_dict: dict[str, Any] = {
                 "bias": bias_result.absolute,
                 "bias_result": {
                     "absolute": bias_result.absolute,
@@ -907,13 +902,13 @@ class SensorAnalyzer:
                 "residuals": residuals.tolist(),
                 "error_code": AnalysisErrorCode.SUCCESS.value
             }
-            
+
             # 4. Health scoring
             health = self.get_health_score(metrics_dict)
-            
+
             # 5. RUL prediction
             rul = self.calc_rul(trend, slope, reference_value)
-            
+
             return {
                 "metrics": metrics_dict,
                 "health": {
@@ -928,10 +923,10 @@ class SensorAnalyzer:
                 "error_code": AnalysisErrorCode.SUCCESS.value,
                 "error_message": None
             }
-            
+
         except ValueError as e:
             error_msg = str(e)
-            
+
             # Determine error code
             if "NaN" in error_msg:
                 error_code = AnalysisErrorCode.NAN_VALUES
@@ -943,9 +938,9 @@ class SensorAnalyzer:
                 error_code = AnalysisErrorCode.CONSTANT_SIGNAL
             else:
                 error_code = AnalysisErrorCode.COMPUTATION_ERROR
-            
+
             logger.warning(f"Analysis failed: {error_msg}")
-            
+
             return {
                 "metrics": None,
                 "health": None,
@@ -953,10 +948,10 @@ class SensorAnalyzer:
                 "error_code": error_code.value,
                 "error_message": error_msg
             }
-            
+
         except Exception as e:
             logger.error(f"Unexpected analysis error: {e}", exc_info=True)
-            
+
             return {
                 "metrics": None,
                 "health": None,

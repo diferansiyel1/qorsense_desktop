@@ -4,12 +4,13 @@ Health Check Routes
 Provides health, liveness, and readiness endpoints for monitoring.
 """
 
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-from backend.database import get_db
-from backend.core.config import settings
 import logging
+
+from backend.core.config import settings
+from backend.database import get_db
+from fastapi import APIRouter, Depends
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 

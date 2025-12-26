@@ -5,11 +5,12 @@ Handles PDF report generation for analysis results.
 Protected with JWT authentication - requires valid access token in production.
 """
 
+import logging
+
+from backend.api.deps import DevUser
+from backend.models import ReportRequest
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from backend.models import ReportRequest
-from backend.api.deps import DevUser
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -35,16 +36,16 @@ async def generate_report(
     """
     try:
         from backend.report_gen import create_pdf
-        
+
         # Prepare raw data
         raw_data = request.data if request.data else []
-        
+
         # Prepare metrics
         metrics_data = request.metrics.dict() if hasattr(request.metrics, 'dict') else request.metrics.model_dump()
         metrics_data["sensor_id"] = request.sensor_id
         metrics_data["flags"] = request.flags
         metrics_data["recommendation"] = request.recommendation
-        
+
         # Generate PDF
         pdf_path = create_pdf(
             metrics=metrics_data,
@@ -52,7 +53,7 @@ async def generate_report(
             diagnosis=request.diagnosis,
             health_score=request.health_score
         )
-        
+
         user_info = current_user.username if current_user else "anonymous (dev mode)"
         logger.info(f"Generated report for sensor {request.sensor_id} by user: {user_info}")
         return FileResponse(

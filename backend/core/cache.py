@@ -4,20 +4,21 @@ Caching Layer
 Provides caching decorators and utilities using Redis (optional) or in-memory fallback.
 """
 
+import logging
 import os
 import pickle
-import logging
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Optional, Callable
+
 import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)
 
 # Redis Connection (Lazy init)
-redis_client: Optional[redis.Redis] = None
+redis_client: redis.Redis | None = None
 
 
-async def get_redis() -> Optional[redis.Redis]:
+async def get_redis() -> redis.Redis | None:
     """Get or initialize Redis client."""
     global redis_client
     if redis_client is None:
@@ -49,7 +50,7 @@ def cache(ttl_seconds: int = 300, key_prefix: str = ""):
             key_parts.extend([str(arg) for arg in args])
             key_parts.extend([f"{k}={v}" for k, v in sorted(kwargs.items())])
             cache_key = ":".join(key_parts)
-            
+
             # Try to get from cache
             r = await get_redis()
             if r:
@@ -60,17 +61,17 @@ def cache(ttl_seconds: int = 300, key_prefix: str = ""):
                         return pickle.loads(cached_data)
                 except Exception as e:
                     logger.warning(f"Cache get error: {e}")
-            
+
             # Execute function
             result = await func(*args, **kwargs)
-            
+
             # Set to cache
             if r:
                 try:
                     await r.setex(cache_key, ttl_seconds, pickle.dumps(result))
                 except Exception as e:
                     logger.warning(f"Cache set error: {e}")
-                    
+
             return result
         return wrapper
     return decorator

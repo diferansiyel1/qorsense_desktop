@@ -4,11 +4,12 @@ Metrics Collection
 Provides Prometheus metrics for application monitoring.
 """
 
-import time
 import logging
-from typing import Callable
+import time
+from collections.abc import Callable
 from functools import wraps
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 logger = logging.getLogger(__name__)
 

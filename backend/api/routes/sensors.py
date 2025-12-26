@@ -10,28 +10,26 @@ Security:
 - Role-based access: DELETE requires ORG_ADMIN or SUPER_ADMIN
 """
 
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, BackgroundTasks, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, insert, desc, func, delete
-from backend.database import get_db, AsyncSessionLocal
-from backend.models_db import Sensor, SensorReading, AnalysisResultDB, SourceType, Role, User
-from backend.models import SensorCreate, SensorResponse, AnalysisResult, AnalysisMetrics
-from backend.schemas.common import PaginationParams, PaginatedResponse
-from backend.schemas.sensor import SensorReadingBulk, CSVImportResult
+import codecs
+import csv
+import logging
+import math
+import uuid
+from datetime import datetime
+
 from backend.api.deps import (
     DbSession,
-    CurrentUser,
-    CurrentActiveUser,
     RoleChecker,
     get_current_active_user,
 )
-from datetime import datetime
-import logging
-import csv
-import codecs
-import uuid
-import math
+from backend.database import AsyncSessionLocal, get_db
+from backend.models import AnalysisMetrics, AnalysisResult, SensorCreate, SensorResponse
+from backend.models_db import AnalysisResultDB, Role, Sensor, SensorReading, SourceType, User
+from backend.schemas.common import PaginatedResponse, PaginationParams
+from backend.schemas.sensor import CSVImportResult, SensorReadingBulk
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from sqlalchemy import delete, desc, func, insert, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -65,17 +63,17 @@ async def get_sensor_with_org_check(
         select(Sensor).where(Sensor.id == sensor_id)
     )
     sensor = result.scalar_one_or_none()
-    
+
     if sensor is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sensör bulunamadı: {sensor_id}"
         )
-    
+
     # SUPER_ADMIN can access all
     if user.role == Role.SUPER_ADMIN:
         return sensor
-    
+
     # Check organization membership
     if sensor.organization_id != user.organization_id:
         # Return 404 instead of 403 to not leak sensor existence
@@ -83,7 +81,7 @@ async def get_sensor_with_org_check(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Sensör bulunamadı: {sensor_id}"
         )
-    
+
     return sensor
 
 
@@ -108,20 +106,20 @@ async def get_sensors(
     # Build base query with organization filter
     base_query = select(Sensor)
     count_query = select(func.count()).select_from(Sensor)
-    
+
     # Apply org filter (SUPER_ADMIN sees all)
     if current_user.role != Role.SUPER_ADMIN:
         base_query = base_query.where(Sensor.organization_id == current_user.organization_id)
         count_query = count_query.where(Sensor.organization_id == current_user.organization_id)
-    
+
     # Count total
     total = await db.scalar(count_query)
-    
+
     # Get items with pagination
     stmt = base_query.offset((pagination.page - 1) * pagination.size).limit(pagination.size)
     result = await db.execute(stmt)
     sensors = result.scalars().all()
-    
+
     sensor_responses = []
     for s in sensors:
         stmt = (
@@ -132,7 +130,7 @@ async def get_sensors(
         )
         res = await db.execute(stmt)
         latest_analysis = res.scalar_one_or_none()
-        
+
         response = SensorResponse(
             id=s.id,
             name=s.name,
@@ -144,9 +142,9 @@ async def get_sensors(
             latest_analysis_timestamp=latest_analysis.timestamp if latest_analysis else None
         )
         sensor_responses.append(response)
-    
+
     logger.info(f"User {current_user.email} listed {len(sensor_responses)} sensors")
-    
+
     return PaginatedResponse(
         items=sensor_responses,
         total=total or 0,
@@ -170,7 +168,7 @@ async def get_sensor(
     **Authentication**: Required
     """
     sensor = await get_sensor_with_org_check(sensor_id, current_user, db)
-    
+
     # Get latest analysis
     stmt = (
         select(AnalysisResultDB)
@@ -180,7 +178,7 @@ async def get_sensor(
     )
     res = await db.execute(stmt)
     latest_analysis = res.scalar_one_or_none()
-    
+
     return SensorResponse(
         id=sensor.id,
         name=sensor.name,
@@ -209,7 +207,7 @@ async def get_sensor_history(
     """
     # Verify sensor ownership first
     await get_sensor_with_org_check(sensor_id, current_user, db)
-    
+
     # Count total
     count_stmt = (
         select(func.count())
@@ -217,7 +215,7 @@ async def get_sensor_history(
         .where(AnalysisResultDB.sensor_id == sensor_id)
     )
     total = await db.scalar(count_stmt)
-    
+
     # Get items
     stmt = (
         select(AnalysisResultDB)
@@ -228,12 +226,12 @@ async def get_sensor_history(
     )
     result = await db.execute(stmt)
     history_db = result.scalars().all()
-    
+
     history_pydantic = []
     for item in history_db:
         try:
             metrics_obj = AnalysisMetrics(**item.metrics)
-            
+
             res = AnalysisResult(
                 sensor_id=item.sensor_id,
                 timestamp=item.timestamp.isoformat(),
@@ -248,7 +246,7 @@ async def get_sensor_history(
         except Exception as e:
             logger.error(f"Error converting history item {item.id}: {e}")
             continue
-            
+
     return PaginatedResponse(
         items=history_pydantic,
         total=total or 0,
@@ -259,7 +257,7 @@ async def get_sensor_history(
 
 
 # ==============================================================================
-# CREATE / UPDATE / DELETE ENDPOINTS  
+# CREATE / UPDATE / DELETE ENDPOINTS
 # ==============================================================================
 
 @router.post("", response_model=SensorResponse, status_code=status.HTTP_201_CREATED)
@@ -277,10 +275,10 @@ async def create_sensor(
     **Authentication**: Required
     """
     new_id = str(uuid.uuid4())[:8]
-    
+
     # Force organization_id from current user (ignore request body)
     org_id = current_user.organization_id
-    
+
     db_sensor = Sensor(
         id=new_id,
         name=sensor.name,
@@ -291,9 +289,9 @@ async def create_sensor(
     db.add(db_sensor)
     await db.commit()
     await db.refresh(db_sensor)
-    
+
     logger.info(f"User {current_user.email} created sensor: {new_id} - {sensor.name} for org {org_id}")
-    
+
     return SensorResponse(
         id=db_sensor.id,
         name=db_sensor.name,
@@ -322,17 +320,17 @@ async def update_sensor(
     **Authentication**: Required
     """
     db_sensor = await get_sensor_with_org_check(sensor_id, current_user, db)
-    
+
     # Update fields (but never change organization)
     db_sensor.name = sensor_update.name
     db_sensor.location = sensor_update.location
     db_sensor.source_type = SourceType(sensor_update.source_type)
-    
+
     await db.commit()
     await db.refresh(db_sensor)
-    
+
     logger.info(f"User {current_user.email} updated sensor: {sensor_id}")
-    
+
     # Get latest analysis for response
     stmt = (
         select(AnalysisResultDB)
@@ -342,7 +340,7 @@ async def update_sensor(
     )
     res = await db.execute(stmt)
     latest_analysis = res.scalar_one_or_none()
-    
+
     return SensorResponse(
         id=db_sensor.id,
         name=db_sensor.name,
@@ -375,24 +373,24 @@ async def delete_sensor(
     **Authentication**: Required
     """
     db_sensor = await get_sensor_with_org_check(sensor_id, current_user, db)
-    
+
     # Delete related readings first
     await db.execute(
         delete(SensorReading).where(SensorReading.sensor_id == sensor_id)
     )
-    
+
     # Delete related analysis results
     await db.execute(
         delete(AnalysisResultDB).where(AnalysisResultDB.sensor_id == sensor_id)
     )
-    
+
     # Delete sensor
     await db.delete(db_sensor)
     await db.commit()
-    
+
     logger.warning(f"User {current_user.email} (role: {current_user.role.value}) deleted sensor: {sensor_id}")
-    
-    return None
+
+    return
 
 
 # ==============================================================================
@@ -462,17 +460,17 @@ async def upload_csv(
     """
     import time
     start_time = time.time()
-    
+
     # ========================================
     # SECURITY: Verify sensor ownership
     # ========================================
     await get_sensor_with_org_check(sensor_id, current_user, db)
-    
+
     logger.info(f"CSV upload started for sensor {sensor_id} by user: {current_user.email}")
-    
+
     # Validate file type
     if file.content_type and file.content_type not in [
-        'text/csv', 
+        'text/csv',
         'application/csv',
         'text/plain',
         'application/octet-stream'  # Some clients send this
@@ -481,25 +479,25 @@ async def upload_csv(
             status_code=400,
             detail=f"Invalid file type: {file.content_type}. Expected CSV file."
         )
-    
+
     # Initialize counters
     total_rows = 0
     imported_rows = 0
     failed_rows = 0
     skipped_rows = 0
-    error_samples: List[str] = []
+    error_samples: list[str] = []
     chunks_processed = 0
-    
+
     try:
         # Create streaming CSV reader
         file_stream = codecs.iterdecode(file.file, 'utf-8', errors='replace')
         reader = csv.reader(file_stream)
-        
+
         # Handle header row
         header = None
         actual_timestamp_col = timestamp_col
         actual_value_col = value_col
-        
+
         if has_header:
             try:
                 header = next(reader, None)
@@ -509,20 +507,20 @@ async def upload_csv(
                         detail="CSV file is empty or contains only whitespace"
                     )
                 logger.debug(f"CSV header: {header}")
-                
+
                 # Smart column detection based on actual header
                 num_cols = len(header)
-                
+
                 if num_cols == 1:
                     # Single column CSV: treat as value only, timestamp = now
                     actual_timestamp_col = -1  # No timestamp column
                     actual_value_col = 0
-                    logger.info(f"Single column CSV detected, using column 0 as value")
+                    logger.info("Single column CSV detected, using column 0 as value")
                 elif num_cols == 2:
                     # Two column CSV: assume [timestamp, value]
                     actual_timestamp_col = 0
                     actual_value_col = 1
-                    logger.info(f"Two column CSV detected: col 0=timestamp, col 1=value")
+                    logger.info("Two column CSV detected: col 0=timestamp, col 1=value")
                 else:
                     # Multi-column: validate requested indices
                     max_required_col = max(timestamp_col, value_col)
@@ -537,20 +535,20 @@ async def upload_csv(
                     status_code=400,
                     detail="CSV file is empty"
                 )
-        
+
         # Process CSV in chunks
-        chunk_buffer: List[dict] = []
+        chunk_buffer: list[dict] = []
         current_row_num = 1 if has_header else 0
-        
+
         for row in reader:
             current_row_num += 1
             total_rows += 1
-            
+
             # Skip empty rows
             if not row or all(cell.strip() == '' for cell in row):
                 skipped_rows += 1
                 continue
-            
+
             try:
                 # Parse row based on column count
                 parsed = _parse_csv_row(
@@ -560,27 +558,27 @@ async def upload_csv(
                     timestamp_col=actual_timestamp_col,
                     value_col=actual_value_col
                 )
-                
+
                 # Validate with Pydantic schema
                 validated = SensorReadingBulk(
                     timestamp=parsed['timestamp'],
                     value=parsed['value']
                 )
-                
+
                 # Build insert record
                 chunk_buffer.append({
                     "sensor_id": sensor_id,
                     "timestamp": validated.timestamp or datetime.now(),
                     "value": validated.value
                 })
-                
+
             except Exception as e:
                 failed_rows += 1
                 error_msg = f"Row {current_row_num}: {str(e)}"
-                
+
                 if len(error_samples) < 10:
                     error_samples.append(error_msg)
-                
+
                 if not skip_errors:
                     # Fail fast mode
                     raise HTTPException(
@@ -588,7 +586,7 @@ async def upload_csv(
                         detail=f"Validation error at {error_msg}"
                     )
                 continue
-            
+
             # Process chunk when buffer is full
             if len(chunk_buffer) >= chunk_size:
                 await _process_chunk(db, chunk_buffer, sensor_id, chunks_processed)
@@ -596,19 +594,19 @@ async def upload_csv(
                 chunks_processed += 1
                 chunk_buffer = []
                 logger.debug(f"Processed chunk {chunks_processed}, total imported: {imported_rows}")
-        
+
         # Process remaining rows in buffer
         if chunk_buffer:
             await _process_chunk(db, chunk_buffer, sensor_id, chunks_processed)
             imported_rows += len(chunk_buffer)
             chunks_processed += 1
-        
+
         # Final commit
         await db.commit()
-        
+
         # Calculate duration
         duration_ms = int((time.time() - start_time) * 1000)
-        
+
         # Build result
         result = CSVImportResult(
             success=True,
@@ -621,16 +619,16 @@ async def upload_csv(
             import_duration_ms=duration_ms,
             chunks_processed=chunks_processed
         )
-        
+
         logger.info(
             f"CSV import completed for {sensor_id} by {current_user.email}: "
             f"{imported_rows}/{total_rows} rows imported, "
             f"{failed_rows} failed, {skipped_rows} skipped, "
             f"in {duration_ms}ms ({chunks_processed} chunks)"
         )
-        
+
         return result
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -667,24 +665,24 @@ async def stream_data(
     """
     if "sensor_id" not in data or "value" not in data:
         raise HTTPException(status_code=400, detail="Missing sensor_id or value")
-    
+
     sensor_id = data["sensor_id"]
-    
+
     # SECURITY: Verify sensor ownership
     await get_sensor_with_org_check(sensor_id, current_user, db)
-    
+
     value = float(data["value"])
     ts = datetime.fromisoformat(data["timestamp"]) if "timestamp" in data else datetime.now()
-    
+
     # Insert reading
     reading = SensorReading(sensor_id=sensor_id, value=value, timestamp=ts)
     db.add(reading)
     await db.commit()
-    
+
     # Trigger background analysis
     from backend.api.routes.analytics import run_background_analysis
     background_tasks.add_task(run_background_analysis, sensor_id, AsyncSessionLocal)
-    
+
     logger.info(f"User {current_user.email} streamed data point for sensor {sensor_id}")
     return {"status": "received", "sensor_id": sensor_id, "timestamp": ts.isoformat()}
 
@@ -694,7 +692,7 @@ async def stream_data(
 # ==============================================================================
 
 def _parse_csv_row(
-    row: List[str],
+    row: list[str],
     row_num: int,
     sensor_id: str,
     timestamp_col: int,
@@ -722,7 +720,7 @@ def _parse_csv_row(
         ValueError: If row cannot be parsed
     """
     num_cols = len(row)
-    
+
     # Handle special case: timestamp_col = -1 means no timestamp column
     if timestamp_col < 0:
         # Value-only mode
@@ -733,7 +731,7 @@ def _parse_csv_row(
         else:
             raise ValueError("Empty row")
         return {'timestamp': None, 'value': val_str}
-    
+
     # Standard column parsing
     if num_cols >= max(timestamp_col, value_col) + 1:
         # Use specified column indices
@@ -749,11 +747,11 @@ def _parse_csv_row(
         val_str = row[0].strip()
     else:
         raise ValueError(f"Empty row or insufficient columns (got {num_cols})")
-    
+
     # Validate value is present
     if not val_str:
         raise ValueError("Missing value in row")
-    
+
     return {
         'timestamp': ts_str if ts_str else None,
         'value': val_str
@@ -762,7 +760,7 @@ def _parse_csv_row(
 
 async def _process_chunk(
     db: AsyncSession,
-    chunk: List[dict],
+    chunk: list[dict],
     sensor_id: str,
     chunk_num: int
 ) -> None:
@@ -783,7 +781,7 @@ async def _process_chunk(
     """
     if not chunk:
         return
-    
+
     try:
         await db.execute(insert(SensorReading), chunk)
         logger.debug(f"Inserted chunk {chunk_num} with {len(chunk)} rows for {sensor_id}")

@@ -5,18 +5,13 @@ This module defines the SQLAlchemy ORM models for the multi-tenant architecture.
 Supports organizations, users with role-based access, and sensor data management.
 """
 
-from sqlalchemy import (
-    Column, Integer, String, Float, ForeignKey, DateTime, 
-    Enum, JSON, Text, Boolean
-)
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-from backend.database import Base
 import enum
 import uuid
 from datetime import datetime
 
+from backend.database import Base
+from sqlalchemy import JSON, Boolean, Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import relationship
 
 # ==============================================================================
 # ENUMS
@@ -64,8 +59,8 @@ class Organization(Base):
     __tablename__ = "organizations"
 
     id = Column(
-        String(36), 
-        primary_key=True, 
+        String(36),
+        primary_key=True,
         default=lambda: str(uuid.uuid4()),
         index=True
     )
@@ -89,10 +84,10 @@ class User(Base):
     Users belong to an organization and have role-based access control.
     """
     __tablename__ = "users"
-    
+
     id = Column(
-        String(36), 
-        primary_key=True, 
+        String(36),
+        primary_key=True,
         default=lambda: str(uuid.uuid4()),
         index=True
     )
@@ -101,8 +96,8 @@ class User(Base):
     full_name = Column(String(255), nullable=True)
     role = Column(Enum(Role), default=Role.ENGINEER, nullable=False)
     organization_id = Column(
-        String(36), 
-        ForeignKey("organizations.id", ondelete="CASCADE"), 
+        String(36),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
         nullable=True,
         index=True
     )
@@ -110,7 +105,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
-    
+
     # Relationships
     organization = relationship("Organization", back_populates="users")
 
@@ -133,7 +128,7 @@ class Sensor(Base):
 
     id = Column(String(50), primary_key=True, index=True)  # Hardware ID (e.g., 'pH-01')
     organization_id = Column(
-        String(36), 
+        String(36),
         ForeignKey("organizations.id", ondelete="SET NULL"),
         nullable=True,
         index=True
@@ -164,8 +159,8 @@ class SensorReading(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     sensor_id = Column(
-        String(50), 
-        ForeignKey("sensors.id", ondelete="CASCADE"), 
+        String(50),
+        ForeignKey("sensors.id", ondelete="CASCADE"),
         index=True,
         nullable=False
     )
@@ -189,8 +184,8 @@ class AnalysisResultDB(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     sensor_id = Column(
-        String(50), 
-        ForeignKey("sensors.id", ondelete="CASCADE"), 
+        String(50),
+        ForeignKey("sensors.id", ondelete="CASCADE"),
         index=True,
         nullable=False
     )

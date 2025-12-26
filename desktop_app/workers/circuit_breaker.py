@@ -5,10 +5,11 @@ Prevents cascading failures by temporarily blocking requests to
 unresponsive devices, allowing them time to recover while the
 rest of the system continues operating.
 """
-import time
 import threading
-from typing import Callable, Optional, Any, Dict
-from dataclasses import dataclass, field
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 from .models import CircuitState, DeviceStatus
 
@@ -31,7 +32,7 @@ class CircuitBreakerStats:
     failed_requests: int = 0
     rejected_requests: int = 0
     state_changes: int = 0
-    last_state_change_time: Optional[float] = None
+    last_state_change_time: float | None = None
 
 
 class CircuitBreaker:
@@ -74,8 +75,8 @@ class CircuitBreaker:
     def __init__(
         self,
         device_id: str,
-        config: Optional[CircuitBreakerConfig] = None,
-        on_state_change: Optional[Callable[[str, CircuitState, CircuitState], None]] = None
+        config: CircuitBreakerConfig | None = None,
+        on_state_change: Callable[[str, CircuitState, CircuitState], None] | None = None
     ):
         """
         Initialize a circuit breaker for a device.
@@ -88,19 +89,19 @@ class CircuitBreaker:
         self.device_id = device_id
         self.config = config or CircuitBreakerConfig()
         self._on_state_change = on_state_change
-        
+
         # State
         self._state = CircuitState.CLOSED
         self._failure_count = 0
         self._success_count = 0
-        self._last_failure_time: Optional[float] = None
-        self._last_success_time: Optional[float] = None
+        self._last_failure_time: float | None = None
+        self._last_success_time: float | None = None
         self._current_timeout = self.config.recovery_timeout
-        self._open_time: Optional[float] = None
-        
+        self._open_time: float | None = None
+
         # Statistics
         self.stats = CircuitBreakerStats()
-        
+
         # Thread safety
         self._lock = threading.RLock()
 
@@ -133,7 +134,7 @@ class CircuitBreaker:
             return self._failure_count
 
     @property
-    def time_until_retry(self) -> Optional[float]:
+    def time_until_retry(self) -> float | None:
         """
         Get remaining time until next retry attempt (when OPEN).
         
@@ -261,7 +262,7 @@ class CircuitBreaker:
     def execute(
         self,
         operation: Callable[[], Any],
-        fallback: Optional[Callable[[], Any]] = None
+        fallback: Callable[[], Any] | None = None
     ) -> Any:
         """
         Execute an operation with circuit breaker protection.
@@ -289,7 +290,7 @@ class CircuitBreaker:
             result = operation()
             self.record_success()
             return result
-        except Exception as e:
+        except Exception:
             self.record_failure()
             raise
 
@@ -313,12 +314,12 @@ class CircuitBreaker:
         state = self.state
         if state == CircuitState.CLOSED:
             return DeviceStatus.ONLINE
-        elif state == CircuitState.OPEN:
+        if state == CircuitState.OPEN:
             return DeviceStatus.OFFLINE
-        else:  # HALF_OPEN
-            return DeviceStatus.RECONNECTING
+        # HALF_OPEN
+        return DeviceStatus.RECONNECTING
 
-    def get_status_dict(self) -> Dict[str, Any]:
+    def get_status_dict(self) -> dict[str, Any]:
         """
         Get complete status information as dictionary.
         
@@ -367,17 +368,17 @@ class CircuitBreakerRegistry:
         >>> open_circuits = registry.get_open_circuits()
     """
 
-    def __init__(self, default_config: Optional[CircuitBreakerConfig] = None):
+    def __init__(self, default_config: CircuitBreakerConfig | None = None):
         """
         Initialize the registry.
         
         Args:
             default_config: Default configuration for new circuit breakers
         """
-        self._breakers: Dict[str, CircuitBreaker] = {}
+        self._breakers: dict[str, CircuitBreaker] = {}
         self._default_config = default_config or CircuitBreakerConfig()
         self._lock = threading.RLock()
-        self._on_state_change: Optional[Callable[[str, CircuitState, CircuitState], None]] = None
+        self._on_state_change: Callable[[str, CircuitState, CircuitState], None] | None = None
 
     def set_state_change_callback(
         self,
@@ -394,7 +395,7 @@ class CircuitBreakerRegistry:
     def get_or_create(
         self,
         device_id: str,
-        config: Optional[CircuitBreakerConfig] = None
+        config: CircuitBreakerConfig | None = None
     ) -> CircuitBreaker:
         """
         Get existing or create new circuit breaker for a device.
@@ -415,7 +416,7 @@ class CircuitBreakerRegistry:
                 )
             return self._breakers[device_id]
 
-    def get(self, device_id: str) -> Optional[CircuitBreaker]:
+    def get(self, device_id: str) -> CircuitBreaker | None:
         """
         Get circuit breaker for a device if it exists.
         
@@ -444,7 +445,7 @@ class CircuitBreakerRegistry:
                 return True
             return False
 
-    def get_all(self) -> Dict[str, CircuitBreaker]:
+    def get_all(self) -> dict[str, CircuitBreaker]:
         """
         Get all registered circuit breakers.
         
@@ -454,7 +455,7 @@ class CircuitBreakerRegistry:
         with self._lock:
             return dict(self._breakers)
 
-    def get_open_circuits(self) -> Dict[str, CircuitBreaker]:
+    def get_open_circuits(self) -> dict[str, CircuitBreaker]:
         """
         Get all circuit breakers in OPEN state.
         
@@ -468,7 +469,7 @@ class CircuitBreakerRegistry:
                 if cb.is_open
             }
 
-    def get_status_summary(self) -> Dict[str, Any]:
+    def get_status_summary(self) -> dict[str, Any]:
         """
         Get summary status of all circuit breakers.
         
@@ -481,7 +482,7 @@ class CircuitBreakerRegistry:
                 CircuitState.OPEN: 0,
                 CircuitState.HALF_OPEN: 0
             }
-            
+
             for cb in self._breakers.values():
                 states[cb.state] += 1
 

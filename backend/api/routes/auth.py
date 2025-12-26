@@ -14,40 +14,34 @@ JWT Payload includes:
 - role: user role (super_admin, org_admin, engineer)
 """
 
-from datetime import datetime, timedelta
-from typing import Annotated, Optional
 import uuid
+from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from backend.database import get_db
-from backend.models_db import User, Organization, Role
+from backend.api.deps import CurrentUser, DbSession
 from backend.core.config import settings
 from backend.core.security import (
     create_access_token,
     create_refresh_token,
-    verify_token,
     get_password_hash,
     verify_password,
+    verify_token,
 )
+from backend.models_db import Organization, Role, User
 from backend.schemas.auth import (
+    OrganizationResponse,
+    RegisterRequest,
+    RegisterResponse,
     Token,
     TokenRefreshRequest,
     UserCreate,
     UserLogin,
     UserResponse,
     UserUpdate,
-    OrganizationCreate,
-    OrganizationResponse,
-    RegisterRequest,
-    RegisterResponse,
 )
-from backend.api.deps import CurrentUser, DbSession
-
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy import select
 
 router = APIRouter(
     prefix="/api/auth",
@@ -76,10 +70,10 @@ def create_jwt_with_claims(user: User) -> tuple[str, str]:
         "org_id": str(user.organization_id) if user.organization_id else None,
         "role": user.role.value if isinstance(user.role, Role) else str(user.role),
     }
-    
+
     access_token = create_access_token(data=token_data)
     refresh_token = create_refresh_token(data=token_data)
-    
+
     return access_token, refresh_token
 
 
@@ -107,7 +101,7 @@ async def login(
         select(User).where(User.email == credentials.email)
     )
     user = result.scalar_one_or_none()
-    
+
     # Verify user exists and password is correct
     if user is None or not verify_password(credentials.password, user.hashed_password):
         raise HTTPException(
@@ -115,21 +109,21 @@ async def login(
             detail="Email veya şifre hatalı",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     # Check if user is active
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Hesabınız devre dışı bırakılmış",
         )
-    
+
     # Update last login timestamp
     user.last_login = datetime.utcnow()
     await db.commit()
-    
+
     # Create tokens with extended claims
     access_token, refresh_token = create_jwt_with_claims(user)
-    
+
     return Token(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -153,25 +147,25 @@ async def login_form(
         select(User).where(User.email == form_data.username)
     )
     user = result.scalar_one_or_none()
-    
+
     if user is None or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email veya şifre hatalı",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Hesabınız devre dışı bırakılmış",
         )
-    
+
     user.last_login = datetime.utcnow()
     await db.commit()
-    
+
     access_token, refresh_token = create_jwt_with_claims(user)
-    
+
     return Token(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -198,29 +192,29 @@ async def refresh_access_token(
             detail="Geçersiz veya süresi dolmuş refresh token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    user_id: Optional[str] = payload.get("sub")
+
+    user_id: str | None = payload.get("sub")
     if user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Geçersiz token içeriği",
         )
-    
+
     # Verify user still exists and is active
     result = await db.execute(
         select(User).where(User.id == user_id)
     )
     user = result.scalar_one_or_none()
-    
+
     if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Kullanıcı bulunamadı veya devre dışı",
         )
-    
+
     # Create new access token with fresh claims (in case role/org changed)
     access_token, _ = create_jwt_with_claims(user)
-    
+
     return Token(
         access_token=access_token,
         refresh_token=request.refresh_token,  # Return same refresh token
@@ -234,8 +228,8 @@ async def refresh_access_token(
 # ==============================================================================
 
 @router.post(
-    "/register", 
-    response_model=RegisterResponse, 
+    "/register",
+    response_model=RegisterResponse,
     status_code=status.HTTP_201_CREATED
 )
 async def register(
@@ -262,7 +256,7 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Bu email adresi zaten kayıtlı",
         )
-    
+
     # Check if organization name already exists
     result = await db.execute(
         select(Organization).where(Organization.name == data.organization_name.strip())
@@ -272,7 +266,7 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Bu organizasyon adı zaten kullanımda",
         )
-    
+
     try:
         # Create organization
         new_org = Organization(
@@ -282,7 +276,7 @@ async def register(
         )
         db.add(new_org)
         await db.flush()  # Get the org ID without committing
-        
+
         # Create admin user for this organization
         new_user = User(
             id=str(uuid.uuid4()),
@@ -294,19 +288,19 @@ async def register(
             is_active=True,
         )
         db.add(new_user)
-        
+
         # Commit transaction (atomic)
         await db.commit()
         await db.refresh(new_org)
         await db.refresh(new_user)
-        
+
     except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Kayıt işlemi başarısız: {str(e)}",
         )
-    
+
     return RegisterResponse(
         organization=OrganizationResponse.model_validate(new_org),
         user=UserResponse.model_validate(new_user),
@@ -315,8 +309,8 @@ async def register(
 
 
 @router.post(
-    "/users", 
-    response_model=UserResponse, 
+    "/users",
+    response_model=UserResponse,
     status_code=status.HTTP_201_CREATED
 )
 async def create_user(
@@ -336,7 +330,7 @@ async def create_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Bu işlem için yetkiniz yok (ORG_ADMIN veya SUPER_ADMIN gerekli)",
         )
-    
+
     # Check if email already exists
     result = await db.execute(
         select(User).where(User.email == user_data.email)
@@ -346,18 +340,18 @@ async def create_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Bu email adresi zaten kayıtlı",
         )
-    
+
     # Determine the organization for the new user
     # SUPER_ADMIN can create users without org, ORG_ADMIN creates in their org
     org_id = current_user.organization_id
-    
+
     # Validate role assignment
     if user_data.role == Role.SUPER_ADMIN and current_user.role != Role.SUPER_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="SUPER_ADMIN rolü sadece SUPER_ADMIN tarafından atanabilir",
         )
-    
+
     # Create new user
     new_user = User(
         id=str(uuid.uuid4()),
@@ -368,11 +362,11 @@ async def create_user(
         organization_id=org_id,
         is_active=True,
     )
-    
+
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
-    
+
     return new_user
 
 
@@ -416,17 +410,17 @@ async def update_me(
                 detail="Bu email adresi başka bir kullanıcı tarafından kullanılıyor",
             )
         current_user.email = update_data.email
-    
+
     if update_data.full_name is not None:
         current_user.full_name = update_data.full_name
-    
+
     if update_data.password is not None:
         current_user.hashed_password = get_password_hash(update_data.password)
-    
+
     current_user.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(current_user)
-    
+
     return current_user
 
 
@@ -462,16 +456,16 @@ async def get_my_organization(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Bir organizasyona bağlı değilsiniz",
         )
-    
+
     result = await db.execute(
         select(Organization).where(Organization.id == current_user.organization_id)
     )
     org = result.scalar_one_or_none()
-    
+
     if org is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organizasyon bulunamadı",
         )
-    
+
     return org

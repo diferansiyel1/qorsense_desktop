@@ -4,11 +4,11 @@ Base Repository
 Provides generic database operations for all repositories.
 """
 
-from typing import Generic, TypeVar, Type, List, Optional, Dict, Any
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, desc
-from sqlalchemy.orm import DeclarativeBase
+from typing import Any, Generic, TypeVar
 
+from sqlalchemy import delete, desc, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import DeclarativeBase
 
 ModelType = TypeVar("ModelType", bound=DeclarativeBase)
 
@@ -19,8 +19,8 @@ class BaseRepository(Generic[ModelType]):
     
     Generic repository pattern for type-safe database operations.
     """
-    
-    def __init__(self, model: Type[ModelType], session: AsyncSession):
+
+    def __init__(self, model: type[ModelType], session: AsyncSession):
         """
         Initialize repository.
         
@@ -30,7 +30,7 @@ class BaseRepository(Generic[ModelType]):
         """
         self.model = model
         self.session = session
-    
+
     async def create(self, **kwargs) -> ModelType:
         """
         Create a new record.
@@ -46,8 +46,8 @@ class BaseRepository(Generic[ModelType]):
         await self.session.commit()
         await self.session.refresh(instance)
         return instance
-    
-    async def get_by_id(self, id: Any) -> Optional[ModelType]:
+
+    async def get_by_id(self, id: Any) -> ModelType | None:
         """
         Get record by ID.
         
@@ -61,13 +61,13 @@ class BaseRepository(Generic[ModelType]):
             select(self.model).where(self.model.id == id)
         )
         return result.scalar_one_or_none()
-    
+
     async def get_all(
         self,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
-        order_by: Optional[str] = None
-    ) -> List[ModelType]:
+        order_by: str | None = None
+    ) -> list[ModelType]:
         """
         Get all records with pagination.
         
@@ -80,7 +80,7 @@ class BaseRepository(Generic[ModelType]):
             List of model instances
         """
         query = select(self.model)
-        
+
         if order_by:
             if order_by.startswith("-"):
                 # Descending order
@@ -89,16 +89,16 @@ class BaseRepository(Generic[ModelType]):
             else:
                 # Ascending order
                 query = query.order_by(getattr(self.model, order_by))
-        
+
         if limit:
             query = query.limit(limit)
         if offset:
             query = query.offset(offset)
-        
+
         result = await self.session.execute(query)
         return list(result.scalars().all())
-    
-    async def update(self, id: Any, **kwargs) -> Optional[ModelType]:
+
+    async def update(self, id: Any, **kwargs) -> ModelType | None:
         """
         Update a record.
         
@@ -116,7 +116,7 @@ class BaseRepository(Generic[ModelType]):
         )
         await self.session.commit()
         return await self.get_by_id(id)
-    
+
     async def delete(self, id: Any) -> bool:
         """
         Delete a record.
@@ -132,8 +132,8 @@ class BaseRepository(Generic[ModelType]):
         )
         await self.session.commit()
         return result.rowcount > 0
-    
-    async def filter(self, **filters) -> List[ModelType]:
+
+    async def filter(self, **filters) -> list[ModelType]:
         """
         Filter records by criteria.
         
@@ -146,10 +146,10 @@ class BaseRepository(Generic[ModelType]):
         query = select(self.model)
         for key, value in filters.items():
             query = query.where(getattr(self.model, key) == value)
-        
+
         result = await self.session.execute(query)
         return list(result.scalars().all())
-    
+
     async def count(self, **filters) -> int:
         """
         Count records matching criteria.
@@ -161,10 +161,10 @@ class BaseRepository(Generic[ModelType]):
             Number of matching records
         """
         from sqlalchemy import func
-        
+
         query = select(func.count()).select_from(self.model)
         for key, value in filters.items():
             query = query.where(getattr(self.model, key) == value)
-        
+
         result = await self.session.execute(query)
         return result.scalar() or 0

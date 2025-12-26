@@ -4,15 +4,13 @@ Modbus Poller Implementation.
 Provides a unified polling interface for both Modbus TCP and RTU connections
 with connection pooling, circuit breaker integration, and structured logging.
 """
-import time
 import logging
-from typing import Dict, Optional, List, Any, Tuple
-from contextlib import contextmanager
+import time
+from typing import Any
 
-from .models import SensorConfig, ConnectionType, DataType, DeviceStatus
-from .modbus_decoder import ModbusDecoder
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitOpenError
-
+from .modbus_decoder import ModbusDecoder
+from .models import ConnectionType, DeviceStatus, SensorConfig
 
 # Structured logger
 logger = logging.getLogger(__name__)
@@ -34,9 +32,9 @@ class ModbusConnection:
             config: Sensor configuration with connection parameters
         """
         self.config = config
-        self._client: Optional[Any] = None
+        self._client: Any | None = None
         self._connected = False
-        self._last_error: Optional[str] = None
+        self._last_error: str | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -94,16 +92,16 @@ class ModbusConnection:
                 port=self.config.port,
                 timeout=self.config.timeout
             )
-        else:  # RTU
-            from pymodbus.client import ModbusSerialClient
-            return ModbusSerialClient(
-                port=self.config.serial_port,
-                baudrate=self.config.baudrate,
-                parity=self.config.parity,
-                stopbits=self.config.stopbits,
-                bytesize=self.config.bytesize,
-                timeout=self.config.timeout
-            )
+        # RTU
+        from pymodbus.client import ModbusSerialClient
+        return ModbusSerialClient(
+            port=self.config.serial_port,
+            baudrate=self.config.baudrate,
+            parity=self.config.parity,
+            stopbits=self.config.stopbits,
+            bytesize=self.config.bytesize,
+            timeout=self.config.timeout
+        )
 
     def read_registers(
         self,
@@ -111,7 +109,7 @@ class ModbusConnection:
         count: int,
         slave_id: int,
         function_code: int = 3
-    ) -> List[int]:
+    ) -> list[int]:
         """
         Read holding or input registers.
         
@@ -142,7 +140,7 @@ class ModbusConnection:
             # Check for errors
             if result is None:
                 raise ModbusReadError("No response received")
-            
+
             if hasattr(result, 'isError') and result.isError():
                 raise ModbusReadError(f"Modbus error: {result}")
 
@@ -212,7 +210,7 @@ class ModbusConnection:
             )
         except TypeError:
             pass
-        
+
         # Try pymodbus 3.0-3.10
         try:
             return self._client.read_input_registers(
@@ -222,7 +220,7 @@ class ModbusConnection:
             )
         except TypeError:
             pass
-        
+
         # Fallback for 2.x
         return self._client.read_input_registers(
             address,
@@ -268,7 +266,7 @@ class ModbusPoller:
 
     def __init__(
         self,
-        circuit_breaker_config: Optional[CircuitBreakerConfig] = None
+        circuit_breaker_config: CircuitBreakerConfig | None = None
     ):
         """
         Initialize the poller.
@@ -276,9 +274,9 @@ class ModbusPoller:
         Args:
             circuit_breaker_config: Optional configuration for circuit breakers
         """
-        self._sensors: Dict[str, SensorConfig] = {}
-        self._connections: Dict[str, ModbusConnection] = {}
-        self._circuit_breakers: Dict[str, CircuitBreaker] = {}
+        self._sensors: dict[str, SensorConfig] = {}
+        self._connections: dict[str, ModbusConnection] = {}
+        self._circuit_breakers: dict[str, CircuitBreaker] = {}
         self._decoder = ModbusDecoder()
         self._cb_config = circuit_breaker_config or CircuitBreakerConfig()
 
@@ -291,7 +289,7 @@ class ModbusPoller:
         """
         sensor_id = config.name
         self._sensors[sensor_id] = config
-        
+
         # Create circuit breaker
         self._circuit_breakers[sensor_id] = CircuitBreaker(
             device_id=sensor_id,
@@ -299,7 +297,7 @@ class ModbusPoller:
                 failure_threshold=config.max_retries
             )
         )
-        
+
         # Log addition
         self._log_event("sensor_added", sensor_id, {
             "connection_type": config.connection_type.value,
@@ -320,14 +318,14 @@ class ModbusPoller:
         """
         if sensor_id not in self._sensors:
             return False
-        
+
         del self._sensors[sensor_id]
-        
+
         if sensor_id in self._circuit_breakers:
             del self._circuit_breakers[sensor_id]
-        
+
         # Note: Connection pool is shared, don't disconnect
-        
+
         self._log_event("sensor_removed", sensor_id, {})
         return True
 
@@ -349,7 +347,7 @@ class ModbusPoller:
     def poll_sensor(
         self,
         sensor_id: str
-    ) -> Tuple[Optional[float], float, Optional[str]]:
+    ) -> tuple[float | None, float, str | None]:
         """
         Poll a single sensor.
         
@@ -362,13 +360,13 @@ class ModbusPoller:
             - error_message is None if successful
         """
         timestamp = time.time()
-        
+
         if sensor_id not in self._sensors:
             return None, timestamp, f"Sensor not found: {sensor_id}"
-        
+
         config = self._sensors[sensor_id]
         cb = self._circuit_breakers.get(sensor_id)
-        
+
         # Check circuit breaker
         if cb and not cb.allow_request():
             self._log_event("circuit_open", sensor_id, {
@@ -379,7 +377,7 @@ class ModbusPoller:
         try:
             # Get or create connection
             connection = self._get_connection(config)
-            
+
             # Ensure connected
             if not connection.is_connected:
                 if not connection.connect():
@@ -408,13 +406,13 @@ class ModbusPoller:
                 }
                 data_type_str = config.data_type.value if hasattr(config.data_type, 'value') else str(config.data_type)
                 reg_count = type_to_count.get(data_type_str, 2)
-                
+
                 if len(registers) >= offset + reg_count:
                     registers = registers[offset:offset + reg_count]
 
             # Decode value
             raw_value = self._decoder.decode(registers, config.data_type)
-            
+
             # Apply scaling
             scaled_value = (raw_value * config.scale_factor) + config.offset
 
@@ -435,27 +433,27 @@ class ModbusPoller:
             error_msg = str(e)
             if cb:
                 cb.record_failure()
-            
+
             self._log_event("read_error", sensor_id, {
                 "error": error_msg,
                 "failure_count": cb.failure_count if cb else 0
             }, level="WARNING")
-            
+
             return None, timestamp, error_msg
 
         except Exception as e:
             error_msg = f"Unexpected error: {e}"
             if cb:
                 cb.record_failure()
-            
+
             self._log_event("read_error", sensor_id, {
                 "error": error_msg,
                 "exception_type": type(e).__name__
             }, level="ERROR")
-            
+
             return None, timestamp, error_msg
 
-    def poll_all(self) -> Dict[str, Tuple[Optional[float], float, Optional[str]]]:
+    def poll_all(self) -> dict[str, tuple[float | None, float, str | None]]:
         """
         Poll all registered sensors.
         
@@ -467,7 +465,7 @@ class ModbusPoller:
             results[sensor_id] = self.poll_sensor(sensor_id)
         return results
 
-    def get_healthy_sensors(self) -> List[str]:
+    def get_healthy_sensors(self) -> list[str]:
         """
         Get list of sensors with ONLINE status.
         
@@ -480,7 +478,7 @@ class ModbusPoller:
             if self.get_sensor_status(sensor_id) == DeviceStatus.ONLINE
         ]
 
-    def get_offline_sensors(self) -> List[str]:
+    def get_offline_sensors(self) -> list[str]:
         """
         Get list of sensors with OFFLINE status.
         
@@ -500,10 +498,10 @@ class ModbusPoller:
         Implements connection pooling by endpoint.
         """
         connection_key = config.get_connection_key()
-        
+
         if connection_key not in self._connections:
             self._connections[connection_key] = ModbusConnection(config)
-        
+
         return self._connections[connection_key]
 
     def disconnect_all(self) -> None:
@@ -511,7 +509,7 @@ class ModbusPoller:
         for connection in self._connections.values():
             connection.disconnect()
         self._connections.clear()
-        
+
         self._log_event("disconnected_all", "system", {
             "connection_count": len(self._connections)
         })
@@ -520,12 +518,12 @@ class ModbusPoller:
         """Reset all circuit breakers to CLOSED state."""
         for cb in self._circuit_breakers.values():
             cb.reset()
-        
+
         self._log_event("circuit_breakers_reset", "system", {
             "count": len(self._circuit_breakers)
         })
 
-    def get_status_summary(self) -> Dict[str, Any]:
+    def get_status_summary(self) -> dict[str, Any]:
         """
         Get complete status summary of the poller.
         
@@ -538,7 +536,7 @@ class ModbusPoller:
             DeviceStatus.RECONNECTING: 0,
             DeviceStatus.UNKNOWN: 0
         }
-        
+
         for sensor_id in self._sensors:
             status = self.get_sensor_status(sensor_id)
             statuses[status] += 1
@@ -567,7 +565,7 @@ class ModbusPoller:
         self,
         event: str,
         sensor_id: str,
-        details: Dict[str, Any],
+        details: dict[str, Any],
         level: str = "INFO"
     ) -> None:
         """
@@ -588,8 +586,8 @@ class ModbusPoller:
             "sensor_id": sensor_id,
             **details
         }
-        
+
         log_message = json.dumps(log_entry)
-        
+
         log_func = getattr(logger, level.lower(), logger.info)
         log_func(log_message)

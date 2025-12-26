@@ -5,19 +5,18 @@ Handles sensor data analysis endpoints and background analysis tasks.
 Protected with JWT authentication - requires valid access token.
 """
 
-from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
-from backend.database import get_db
-from backend.models_db import SensorReading, AnalysisResultDB, User
-from backend.models import SensorDataInput, AnalysisResult, AnalysisMetrics
-from backend.analysis import SensorAnalyzer
-from backend.core.config import settings
-from backend.api.deps import DevUser, DbSession
-from typing import Optional
-from datetime import datetime, timedelta
-import numpy as np
 import logging
+from datetime import datetime, timedelta
+
+import numpy as np
+from backend.analysis import SensorAnalyzer
+from backend.api.deps import DbSession, DevUser
+from backend.core.config import settings
+from backend.models import AnalysisMetrics, AnalysisResult, SensorDataInput
+from backend.models_db import AnalysisResultDB, SensorReading
+from fastapi import APIRouter, HTTPException
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +27,13 @@ analyzer = SensorAnalyzer()
 
 
 # Extended Models for Timestamps
-from typing import List
+
+
 class AnalysisMetricsExtended(AnalysisMetrics):
     """Extended metrics with timestamps and trend data."""
-    timestamps: List[str] = []
-    trend: List[float] = []
-    residuals: List[float] = []
+    timestamps: list[str] = []
+    trend: list[float] = []
+    residuals: list[float] = []
 
 
 class AnalysisResultExtended(AnalysisResult):
@@ -78,7 +78,7 @@ async def run_background_analysis(sensor_id: str, db_session_factory):
     """
     async with db_session_factory() as db:
         logger.info(f"Running background analysis for {sensor_id}")
-        
+
         # Fetch last N readings
         window_size = settings.default_window_size
         stmt = (
@@ -89,14 +89,14 @@ async def run_background_analysis(sensor_id: str, db_session_factory):
         )
         result = await db.execute(stmt)
         readings = result.scalars().all()
-        
+
         if len(readings) < 10:
             logger.info("Not enough data for background analysis")
             return
 
         # Prepare values (reverse to chronological order)
         values = [r.value for r in reversed(readings)]
-        
+
         # Analyze
         try:
             clean_data = analyzer.preprocessing(values)
@@ -106,7 +106,7 @@ async def run_background_analysis(sensor_id: str, db_session_factory):
             snr_db = analyzer.calc_snr_db(clean_data)
             hysteresis, hyst_x, hyst_y = analyzer.calc_hysteresis(clean_data)
             hurst, hurst_r2, dfa_scales, dfa_flucts = analyzer.calc_dfa(clean_data)
-            
+
             metrics_dict = {
                 "bias": bias,
                 "slope": slope,
@@ -122,7 +122,7 @@ async def run_background_analysis(sensor_id: str, db_session_factory):
             }
             health = analyzer.get_health_score(metrics_dict)
             rul = analyzer.calc_rul(clean_data, slope)
-            
+
             analysis_result = AnalysisResult(
                 sensor_id=sensor_id,
                 timestamp=datetime.now().isoformat(),
@@ -134,10 +134,10 @@ async def run_background_analysis(sensor_id: str, db_session_factory):
                 recommendation=health["recommendation"],
                 prediction=rul
             )
-            
+
             await save_analysis_result(db, sensor_id, analysis_result)
             logger.info(f"Background analysis completed for {sensor_id}")
-            
+
         except Exception as e:
             logger.error(f"Background analysis error: {e}", exc_info=True)
 
@@ -167,15 +167,15 @@ async def analyze_sensor(
     """
     user_info = current_user.email if current_user else "anonymous (dev mode)"
     logger.info(f"Analysis request for sensor: {data.sensor_id} by user: {user_info}")
-    
+
     values = data.values
     timestamps_iso = []
-    
+
     # If no values provided, fetch from database
     if not values or len(values) == 0:
         start_date = None
         end_date = None
-        
+
         # Check for date range in config
         if data.config:
             if isinstance(data.config, dict):
@@ -184,7 +184,7 @@ async def analyze_sensor(
             else:
                 start_date = getattr(data.config, "start_date", None)
                 end_date = getattr(data.config, "end_date", None)
-                  
+
         if start_date and end_date:
             # Date range query
             try:
@@ -192,7 +192,7 @@ async def analyze_sensor(
                     start_date = datetime.fromisoformat(start_date)
                 if isinstance(end_date, str):
                     end_date = datetime.fromisoformat(end_date)
-                
+
                 stmt = (
                     select(SensorReading)
                     .where(
@@ -203,12 +203,12 @@ async def analyze_sensor(
                     .order_by(SensorReading.timestamp.asc())
                     .limit(settings.max_analysis_points)
                 )
-                
+
                 result = await db.execute(stmt)
                 readings = result.scalars().all()
                 values = [r.value for r in readings]
                 timestamps_iso = [r.timestamp.isoformat() for r in readings]
-                
+
             except Exception as e:
                 logger.error(f"Date range query error: {e}")
                 raise HTTPException(status_code=400, detail="Invalid date format")
@@ -231,12 +231,12 @@ async def analyze_sensor(
             )
             result = await db.execute(stmt)
             readings = result.scalars().all()
-            
+
             # Restore chronological order
             readings_asc = list(reversed(readings))
             values = [r.value for r in readings_asc]
             timestamps_iso = [r.timestamp.isoformat() for r in readings_asc]
-        
+
         # Return empty result if insufficient data
         if len(values) < 5:
             empty_metrics = AnalysisMetricsExtended(
@@ -270,20 +270,20 @@ async def analyze_sensor(
 
     # Create analyzer with custom config if provided
     current_analyzer = SensorAnalyzer(config=data.config) if data.config else analyzer
-    
+
     try:
         # Perform analysis
         analysis_result = current_analyzer.analyze(values)
-        
+
         metrics_dict = analysis_result["metrics"]
         metrics_dict["timestamps"] = timestamps_iso
-        
+
         health = analysis_result["health"]
         rul_prediction = analysis_result["prediction"]
-        
+
         # Construct extended model
         metrics_obj = AnalysisMetricsExtended(**metrics_dict)
-        
+
         result_obj = AnalysisResultExtended(
             sensor_id=data.sensor_id,
             timestamp=datetime.now().isoformat(),
@@ -295,10 +295,10 @@ async def analyze_sensor(
             recommendation=health["recommendation"],
             prediction=rul_prediction
         )
-        
+
         # Save to database
         await save_analysis_result(db, data.sensor_id, result_obj)
-        
+
         logger.info(f"Analysis completed for {data.sensor_id}: health={health['score']:.1f}")
         return result_obj
 
@@ -311,16 +311,16 @@ async def analyze_sensor(
 # Async Analysis Endpoints (Celery-powered)
 # =============================================================================
 
+
 from pydantic import BaseModel, Field
-from typing import Literal
 
 
 class AsyncAnalysisRequest(BaseModel):
     """Request model for async analysis."""
     sensor_id: str = Field(..., description="Sensor ID to analyze")
     sensor_type: str = Field(default="Generic", description="Sensor type")
-    values: List[float] = Field(default=[], description="Optional values override")
-    config: Optional[dict] = Field(default=None, description="Analysis configuration")
+    values: list[float] = Field(default=[], description="Optional values override")
+    config: dict | None = Field(default=None, description="Analysis configuration")
     use_async: bool = Field(default=True, description="Use async processing")
 
 
@@ -369,10 +369,10 @@ async def analyze_sensor_async(
     """
     user_info = current_user.email if current_user else "anonymous (dev mode)"
     logger.info(f"Async analysis request for sensor: {request.sensor_id} by user: {user_info}")
-    
+
     # Get values from request or fetch from database
     values = request.values
-    
+
     if not values or len(values) == 0:
         # Fetch from database
         stmt = (
@@ -383,21 +383,21 @@ async def analyze_sensor_async(
         )
         result = await db.execute(stmt)
         readings = result.scalars().all()
-        
+
         if not readings:
             raise HTTPException(
                 status_code=404,
                 detail=f"No data found for sensor {request.sensor_id}"
             )
-        
+
         values = [r.value for r in reversed(readings)]
-    
+
     # Try async mode with Celery
     if request.use_async:
         try:
             from backend.core.celery_app import REDIS_AVAILABLE
             from backend.tasks.analysis_tasks import analyze_sensor_data
-            
+
             if REDIS_AVAILABLE:
                 # Submit to Celery
                 task = analyze_sensor_data.delay(
@@ -406,9 +406,9 @@ async def analyze_sensor_async(
                     sensor_type=request.sensor_type,
                     config=request.config
                 )
-                
+
                 logger.info(f"Task {task.id} queued for sensor {request.sensor_id}")
-                
+
                 return AsyncAnalysisResponse(
                     task_id=task.id,
                     status="PENDING",
@@ -416,24 +416,23 @@ async def analyze_sensor_async(
                     async_mode=True,
                     poll_url=f"/tasks/{task.id}"
                 )
-            else:
-                logger.warning("Redis unavailable, falling back to sync mode")
-                
+            logger.warning("Redis unavailable, falling back to sync mode")
+
         except ImportError as e:
             logger.warning(f"Celery not available: {e}")
         except Exception as e:
             logger.warning(f"Async task submission failed: {e}, falling back to sync mode")
-    
+
     # Fallback: Synchronous analysis
     import uuid
     fake_task_id = str(uuid.uuid4())
-    
+
     logger.info(f"Running synchronous analysis for {request.sensor_id} (task_id={fake_task_id})")
-    
+
     try:
         # Note: analyzer.analyze() takes raw_data, not keyword args
         analysis_result = analyzer.analyze(raw_data=values)
-        
+
         # Store result temporarily (in production, use Redis or DB)
         # For now, return a special response indicating sync completion
         return AsyncAnalysisResponse(
@@ -443,7 +442,7 @@ async def analyze_sensor_async(
             async_mode=False,
             poll_url=f"/tasks/{fake_task_id}"
         )
-        
+
     except Exception as e:
         logger.error(f"Synchronous analysis failed: {e}", exc_info=True)
         raise HTTPException(

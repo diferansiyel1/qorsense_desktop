@@ -1,6 +1,7 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QSplitter
-from PyQt6.QtCore import Qt
 import pyqtgraph as pg
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QSplitter, QVBoxLayout, QWidget
+
 
 class OscilloscopeWidget(pg.PlotWidget):
     def __init__(self, parent=None, max_points: int = 300):
@@ -10,19 +11,19 @@ class OscilloscopeWidget(pg.PlotWidget):
         self.setLabel('left', 'Amplitude', units='V')
         self.setLabel('bottom', 'Time', units='s')
         self.curve = self.plot(pen=pg.mkPen(color='#00ffff', width=2, style=Qt.PenStyle.SolidLine))
-        
+
         # Real-time buffer
         self.max_points = max_points
         self.data_buffer = []
         self.time_buffer = []
-        
+
     def update_data(self, data, x=None):
         """Update with full dataset (batch mode)."""
         if x is not None:
              self.curve.setData(x=x, y=data)
         else:
              self.curve.setData(data)
-    
+
     def update_realtime(self, value: float, timestamp: float = None):
         """
         Add a single data point for real-time scrolling display.
@@ -32,20 +33,19 @@ class OscilloscopeWidget(pg.PlotWidget):
             value: New data point value
             timestamp: Optional timestamp (uses buffer index if not provided)
         """
-        import time as _time
-        
+
         # Add new point to buffer
         self.data_buffer.append(value)
         if timestamp is not None:
             self.time_buffer.append(timestamp)
         else:
             self.time_buffer.append(len(self.data_buffer))
-        
+
         # Keep buffer size limited (scrolling window)
         if len(self.data_buffer) > self.max_points:
             self.data_buffer = self.data_buffer[-self.max_points:]
             self.time_buffer = self.time_buffer[-self.max_points:]
-        
+
         # Update plot with relative time (0 = oldest, max = newest)
         if self.time_buffer:
             # Normalize time to start from 0
@@ -54,13 +54,13 @@ class OscilloscopeWidget(pg.PlotWidget):
             self.curve.setData(x=relative_time, y=self.data_buffer)
         else:
             self.curve.setData(self.data_buffer)
-    
+
     def clear_realtime_buffer(self):
         """Clear the real-time data buffer."""
         self.data_buffer = []
         self.time_buffer = []
         self.curve.setData([], [])
-    
+
     def get_buffer_data(self) -> list:
         """Return copy of current buffer data for analysis."""
         return list(self.data_buffer)
@@ -82,7 +82,7 @@ class MultiSensorOscilloscope(pg.PlotWidget):
         >>> scope.add_sensor("temperature", "Temperature")
         >>> scope.update_sensor("ph_sensor", 7.12, time.time())
     """
-    
+
     # Predefined color palette for sensors
     COLORS = [
         '#00ffff',  # Cyan
@@ -94,7 +94,7 @@ class MultiSensorOscilloscope(pg.PlotWidget):
         '#22c55e',  # Green
         '#3b82f6',  # Blue
     ]
-    
+
     def __init__(self, parent=None, max_points: int = 300):
         """
         Initialize multi-sensor oscilloscope.
@@ -108,17 +108,17 @@ class MultiSensorOscilloscope(pg.PlotWidget):
         self.showGrid(x=True, y=True, alpha=0.3)
         self.setLabel('left', 'Value')
         self.setLabel('bottom', 'Time', units='s')
-        
+
         self.max_points = max_points
         self.sensors: dict = {}  # {sensor_id: {curve, data, time, color, name}}
         self._color_index = 0
-        
+
         # Add legend
         self.legend = self.addLegend(offset=(10, 10))
-        
+
         # Enable mouse tracking for tooltips
         self.setMouseEnabled(x=True, y=True)
-    
+
     def add_sensor(self, sensor_id: str, display_name: str = None, color: str = None) -> None:
         """
         Add a new sensor trace to the graph.
@@ -130,12 +130,12 @@ class MultiSensorOscilloscope(pg.PlotWidget):
         """
         if sensor_id in self.sensors:
             return  # Already exists
-        
+
         # Assign color
         if color is None:
             color = self.COLORS[self._color_index % len(self.COLORS)]
             self._color_index += 1
-        
+
         # Create curve
         name = display_name or sensor_id
         curve = self.plot(
@@ -143,7 +143,7 @@ class MultiSensorOscilloscope(pg.PlotWidget):
             pen=pg.mkPen(color=color, width=2),
             name=name
         )
-        
+
         # Store sensor info
         self.sensors[sensor_id] = {
             'curve': curve,
@@ -152,7 +152,7 @@ class MultiSensorOscilloscope(pg.PlotWidget):
             'color': color,
             'name': name
         }
-    
+
     def update_sensor(self, sensor_id: str, value: float, timestamp: float = None) -> None:
         """
         Update a specific sensor's data.
@@ -165,9 +165,9 @@ class MultiSensorOscilloscope(pg.PlotWidget):
         if sensor_id not in self.sensors:
             # Auto-add sensor if not exists
             self.add_sensor(sensor_id)
-        
+
         sensor = self.sensors[sensor_id]
-        
+
         # Add to buffers
         sensor['data'].append(value)
         if timestamp is not None:
@@ -175,18 +175,18 @@ class MultiSensorOscilloscope(pg.PlotWidget):
         else:
             import time
             sensor['time'].append(time.time())
-        
+
         # Limit buffer size
         if len(sensor['data']) > self.max_points:
             sensor['data'] = sensor['data'][-self.max_points:]
             sensor['time'] = sensor['time'][-self.max_points:]
-        
+
         # Update curve with relative time
         if sensor['time']:
             t0 = sensor['time'][0]
             rel_time = [t - t0 for t in sensor['time']]
             sensor['curve'].setData(x=rel_time, y=sensor['data'])
-    
+
     def remove_sensor(self, sensor_id: str) -> bool:
         """
         Remove sensor trace from graph.
@@ -199,12 +199,12 @@ class MultiSensorOscilloscope(pg.PlotWidget):
         """
         if sensor_id not in self.sensors:
             return False
-        
+
         sensor = self.sensors[sensor_id]
         self.removeItem(sensor['curve'])
         del self.sensors[sensor_id]
         return True
-    
+
     def clear_sensor(self, sensor_id: str) -> None:
         """Clear data buffer for a specific sensor."""
         if sensor_id in self.sensors:
@@ -212,22 +212,22 @@ class MultiSensorOscilloscope(pg.PlotWidget):
             sensor['data'] = []
             sensor['time'] = []
             sensor['curve'].setData([], [])
-    
+
     def clear_all(self) -> None:
         """Clear all sensor data buffers."""
         for sensor_id in self.sensors:
             self.clear_sensor(sensor_id)
-    
+
     def get_sensor_data(self, sensor_id: str) -> list:
         """Get copy of sensor's data buffer."""
         if sensor_id in self.sensors:
             return list(self.sensors[sensor_id]['data'])
         return []
-    
+
     def get_all_sensor_ids(self) -> list:
         """Get list of all sensor IDs."""
         return list(self.sensors.keys())
-    
+
     def set_sensor_visible(self, sensor_id: str, visible: bool) -> None:
         """Show/hide a sensor trace."""
         if sensor_id in self.sensors:
@@ -243,46 +243,46 @@ class TrendWidget(pg.PlotWidget):
         self.legend = self.addLegend()
         self.curve_trend = None
         self.curve_resid = None
-        
+
     def update_data(self, trend, residuals):
         import logging
         logger = logging.getLogger("TrendWidget")
         logger.info(f"TrendWidget.update_data called with trend length={len(trend) if trend else 0}, residuals length={len(residuals) if residuals else 0}")
         if trend:
             logger.info(f"Trend first 3: {trend[:3]}")
-        
+
         # Get the PlotItem and clear it completely
         plot_item = self.getPlotItem()
         plot_item.clear()
-        
+
         # Reset curves
         self.curve_trend = None
         self.curve_resid = None
-        
+
         # Re-add legend
         if self.legend:
             self.legend.clear()
-        
+
         # Plot new data if available
         if trend:
             self.curve_trend = self.plot(trend, name="Trend", pen=pg.mkPen(color='#ffae00', width=3))
             logger.info(f"Plotted trend curve: {self.curve_trend}")
         if residuals:
             self.curve_resid = self.plot(residuals, name="Residuals", pen=pg.mkPen(color='#32c850', width=1, style=Qt.PenStyle.DotLine))
-            
+
         # Force axis rescale to fit new data
         self.autoRange()
-        
+
         # Force scene and viewport invalidation
         scene = self.scene()
         if scene:
             scene.update()
-        
+
         # Force viewport update
         viewport = self.viewport()
         if viewport:
             viewport.update()
-        
+
         logger.info("TrendWidget.update_data completed")
 
     def clear(self):
@@ -293,7 +293,7 @@ class TrendWidget(pg.PlotWidget):
         self.curve_resid = None
         if self.legend:
             self.legend.clear()
-        
+
         # Force update
         self.repaint()
         self.update()
@@ -304,13 +304,13 @@ class AnalysisDashboard(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        
+
         self.splitter = QSplitter(Qt.Orientation.Vertical)
-        
+
         self.oscilloscope = OscilloscopeWidget()
         self.trend_view = TrendWidget()
-        
+
         self.splitter.addWidget(self.oscilloscope)
         self.splitter.addWidget(self.trend_view)
-        
+
         layout.addWidget(self.splitter)

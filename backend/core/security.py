@@ -5,10 +5,10 @@ Provides JWT authentication, password hashing, and token management.
 """
 
 from datetime import datetime, timedelta
-from typing import Optional
-from jose import JWTError, jwt
+
 import bcrypt
 from backend.core.config import settings
+from jose import JWTError, jwt
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -43,7 +43,7 @@ def get_password_hash(password: str) -> str:
     return hashed.decode('utf-8')
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """
     Create a JWT access token.
     
@@ -55,14 +55,14 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         Encoded JWT token
     """
     to_encode = data.copy()
-    
+
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
         expire = datetime.utcnow() + timedelta(
             minutes=settings.jwt_access_token_expire_minutes
         )
-    
+
     to_encode.update({"exp": expire, "type": "access"})
     encoded_jwt = jwt.encode(
         to_encode,
@@ -85,7 +85,7 @@ def create_refresh_token(data: dict) -> str:
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(days=settings.jwt_refresh_token_expire_days)
     to_encode.update({"exp": expire, "type": "refresh"})
-    
+
     encoded_jwt = jwt.encode(
         to_encode,
         settings.secret_key,
@@ -94,7 +94,7 @@ def create_refresh_token(data: dict) -> str:
     return encoded_jwt
 
 
-def verify_token(token: str, token_type: str = "access") -> Optional[dict]:
+def verify_token(token: str, token_type: str = "access") -> dict | None:
     """
     Verify and decode a JWT token.
     
@@ -111,11 +111,11 @@ def verify_token(token: str, token_type: str = "access") -> Optional[dict]:
             settings.secret_key,
             algorithms=[settings.jwt_algorithm]
         )
-        
+
         # Verify token type
         if payload.get("type") != token_type:
             return None
-        
+
         return payload
     except JWTError:
         return None
@@ -134,5 +134,5 @@ def verify_api_key(api_key: str) -> bool:
     if not settings.api_key:
         # API key authentication disabled
         return False
-    
+
     return api_key == settings.api_key

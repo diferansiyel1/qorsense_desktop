@@ -5,11 +5,11 @@ Configures Celery with Redis as broker and result backend.
 Provides graceful degradation when Redis is unavailable.
 """
 
-import os
 import logging
+import os
+
 from celery import Celery
 from kombu import Queue
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ def create_celery_app() -> Celery:
         backend=CELERY_RESULT_BACKEND,
         include=["backend.tasks.analysis_tasks"],
     )
-    
+
     # Celery configuration
     app.conf.update(
         # Task settings
@@ -63,50 +63,50 @@ def create_celery_app() -> Celery:
         result_serializer="json",
         timezone="UTC",
         enable_utc=True,
-        
+
         # Result backend settings
         result_expires=3600,  # Results expire after 1 hour
         result_extended=True,  # Include task name, args in result
-        
+
         # Task execution settings
         task_track_started=True,  # Track STARTED state
         task_time_limit=300,  # Hard timeout: 5 minutes
         task_soft_time_limit=240,  # Soft timeout: 4 minutes
-        
+
         # Retry settings
         task_acks_late=True,  # Acknowledge after task completion
         task_reject_on_worker_lost=True,
-        
+
         # Default retry policy
         task_default_retry_delay=5,  # 5 seconds between retries
         task_max_retries=3,
-        
+
         # Worker settings
         worker_prefetch_multiplier=4,
         worker_concurrency=4,  # Number of worker processes
-        
+
         # Queue configuration
         task_queues=(
             Queue("default", routing_key="default"),
             Queue("analysis", routing_key="analysis.#"),
             Queue("low_priority", routing_key="low.#"),
         ),
-        
+
         # Default queue
         task_default_queue="default",
         task_default_exchange="tasks",
         task_default_routing_key="default",
-        
+
         # Task routes
         task_routes={
             "backend.tasks.analysis_tasks.*": {"queue": "analysis"},
         },
-        
+
         # Broker connection retry
         broker_connection_retry_on_startup=True,
         broker_connection_max_retries=10,
     )
-    
+
     return app
 
 
@@ -144,15 +144,15 @@ def get_task_status(task_id: str) -> dict:
         Dictionary with task status information.
     """
     from celery.result import AsyncResult
-    
+
     result = AsyncResult(task_id, app=celery_app)
-    
+
     response = {
         "task_id": task_id,
         "status": result.status,
         "ready": result.ready(),
     }
-    
+
     if result.ready():
         if result.successful():
             response["result"] = result.get()
@@ -162,7 +162,7 @@ def get_task_status(task_id: str) -> dict:
         response["info"] = result.info
     elif result.status == "PENDING":
         response["message"] = "Task is pending execution"
-    
+
     return response
 
 

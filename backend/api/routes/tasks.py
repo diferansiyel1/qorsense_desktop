@@ -4,11 +4,12 @@ Task Status Routes.
 Provides endpoints to check status of background Celery tasks.
 """
 
+import logging
+from enum import Enum
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Optional, Any, Dict
-from enum import Enum
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +32,11 @@ class TaskStatusResponse(BaseModel):
     task_id: str = Field(..., description="Unique task identifier")
     status: TaskStatus = Field(..., description="Current task status")
     ready: bool = Field(..., description="Whether task has completed")
-    result: Optional[Any] = Field(None, description="Task result if completed")
-    error: Optional[str] = Field(None, description="Error message if failed")
-    progress: Optional[int] = Field(None, description="Progress percentage (0-100)")
-    message: Optional[str] = Field(None, description="Status message")
-    info: Optional[Dict[str, Any]] = Field(None, description="Additional task info")
+    result: Any | None = Field(None, description="Task result if completed")
+    error: str | None = Field(None, description="Error message if failed")
+    progress: int | None = Field(None, description="Progress percentage (0-100)")
+    message: str | None = Field(None, description="Status message")
+    info: dict[str, Any] | None = Field(None, description="Additional task info")
 
 
 class TaskSubmitResponse(BaseModel):
@@ -62,17 +63,17 @@ async def get_task_status(task_id: str):
         HTTPException 503: If Celery/Redis is not available.
     """
     try:
-        from backend.core.celery_app import celery_app, REDIS_AVAILABLE
+        from backend.core.celery_app import REDIS_AVAILABLE, celery_app
         from celery.result import AsyncResult
-        
+
         if not REDIS_AVAILABLE:
             raise HTTPException(
                 status_code=503,
                 detail="Task queue is not available. Redis connection failed."
             )
-        
+
         result = AsyncResult(task_id, app=celery_app)
-        
+
         response = {
             "task_id": task_id,
             "status": result.status,
@@ -83,7 +84,7 @@ async def get_task_status(task_id: str):
             "message": None,
             "info": None,
         }
-        
+
         if result.ready():
             if result.successful():
                 response["result"] = result.get()
@@ -101,9 +102,9 @@ async def get_task_status(task_id: str):
             response["message"] = "Task is queued and waiting for execution"
         elif result.status == "RETRY":
             response["message"] = "Task is being retried"
-        
+
         return response
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -127,24 +128,24 @@ async def revoke_task(task_id: str, terminate: bool = False):
         Confirmation of revocation.
     """
     try:
-        from backend.core.celery_app import celery_app, REDIS_AVAILABLE
-        
+        from backend.core.celery_app import REDIS_AVAILABLE, celery_app
+
         if not REDIS_AVAILABLE:
             raise HTTPException(
                 status_code=503,
                 detail="Task queue is not available."
             )
-        
+
         celery_app.control.revoke(task_id, terminate=terminate)
-        
+
         logger.info(f"Task {task_id} revoked (terminate={terminate})")
-        
+
         return {
             "task_id": task_id,
             "status": "REVOKED",
             "message": f"Task revocation requested (terminate={terminate})"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -163,21 +164,21 @@ async def list_active_tasks():
     Returns summary of active, scheduled, and reserved tasks.
     """
     try:
-        from backend.core.celery_app import celery_app, REDIS_AVAILABLE
-        
+        from backend.core.celery_app import REDIS_AVAILABLE, celery_app
+
         if not REDIS_AVAILABLE:
             return {
                 "status": "unavailable",
                 "message": "Task queue is not available. Running in synchronous mode."
             }
-        
+
         # Get task stats from workers
         inspect = celery_app.control.inspect()
-        
+
         active = inspect.active() or {}
         scheduled = inspect.scheduled() or {}
         reserved = inspect.reserved() or {}
-        
+
         return {
             "status": "available",
             "workers": list(active.keys()),
@@ -190,7 +191,7 @@ async def list_active_tasks():
                 "reserved": reserved,
             }
         }
-        
+
     except Exception as e:
         logger.warning(f"Could not inspect workers: {e}")
         return {
