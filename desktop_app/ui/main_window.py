@@ -19,6 +19,10 @@ from desktop_app.ui.results_panel import ResultsPanel
 from desktop_app.ui.sensor_status_panel import SensorStatusPanel
 from desktop_app.ui.multi_sensor_dialog import MultiSensorConnectionDialog
 from desktop_app.core.analyzer_bridge import AnalyzerBridge
+from desktop_app.core.sensor_simulation import (
+    SensorSimulationEngine, FaultType,
+    generate_healthy_sensor_data, generate_fault_sensor_data
+)
 from desktop_app.workers.analysis_worker import AnalysisWorker
 from desktop_app.workers.file_loader import FileLoadWorker
 from desktop_app.workers.live_worker import ModbusWorker
@@ -558,7 +562,28 @@ class QorSenseMainWindow(QMainWindow):
         view_menu.addAction("Toggle Alarms").triggered.connect(lambda: self.panel_alarms.setVisible(not self.panel_alarms.isVisible()))
 
         sim_menu = menubar.addMenu("&Simulation")
-        sim_menu.addAction("Run Demo Data").triggered.connect(self.trigger_demo_mode)
+        
+        # Healthy Data Action
+        healthy_action = sim_menu.addAction("🟢 Run Healthy Data")
+        healthy_action.triggered.connect(self.trigger_healthy_simulation)
+        
+        sim_menu.addSeparator()
+        
+        # Fault Data Submenu
+        fault_menu = sim_menu.addMenu("🔴 Run Fault Data")
+        
+        fault_actions = [
+            ("⚙️ Bearing Degradation", "bearing_degradation"),
+            ("📉 Sensor Drift", "sensor_drift"),
+            ("⚡ Intermittent Contact", "intermittent_contact"),
+            ("🔥 Thermal Runaway", "thermal_runaway"),
+            ("💧 Pump Cavitation", "pump_cavitation"),
+            ("🔀 Mixed Degradation", "mixed_degradation"),
+        ]
+        
+        for label, fault_type in fault_actions:
+            action = fault_menu.addAction(label)
+            action.triggered.connect(lambda checked, ft=fault_type: self.trigger_fault_simulation(ft))
 
     # --- LOGIC ---
 
@@ -738,10 +763,78 @@ class QorSenseMainWindow(QMainWindow):
         logger.error(f"File load error: {error_msg}")
 
     def trigger_demo_mode(self):
-        self.status_label.setText("Generating Demo Data...")
-        self.current_data = self.bridge.generate_demo_data(1000)
-        self.dashboard.oscilloscope.update_data(self.current_data)
+        """Legacy demo mode - redirects to healthy simulation."""
+        self.trigger_healthy_simulation()
+    
+    def trigger_healthy_simulation(self):
+        """Generate realistic healthy sensor data for testing."""
+        self.status_label.setText("🟢 Generating Healthy Sensor Data...")
+        
+        # Generate 5 minutes of healthy data at 1Hz
+        self.current_data = generate_healthy_sensor_data(n_samples=300, base_value=25.0)
+        
+        # Generate time axis
+        n_points = len(self.current_data)
+        self.sampling_rate = 1.0
+        time_axis = np.arange(n_points) / self.sampling_rate
+        
+        self.dashboard.oscilloscope.update_data(self.current_data, x=time_axis)
         self.btn_analyze.setEnabled(True)
+        
+        self.panel_alarms.add_alarm(
+            datetime.now().strftime("%H:%M:%S"),
+            "INFO",
+            "Simulation",
+            f"Generated {n_points} healthy sensor samples"
+        )
+        
+        self.status_label.setText(f"🟢 Healthy Data: {n_points} samples @ {self.sampling_rate}Hz")
+        self.run_analysis_on_current_data()
+    
+    def trigger_fault_simulation(self, fault_type: str):
+        """Generate sensor data with specific fault pattern.
+        
+        Args:
+            fault_type: One of 'bearing_degradation', 'sensor_drift', 
+                       'intermittent_contact', 'thermal_runaway',
+                       'pump_cavitation', 'mixed_degradation'
+        """
+        fault_labels = {
+            "bearing_degradation": "⚙️ Bearing Degradation",
+            "sensor_drift": "📉 Sensor Drift",
+            "intermittent_contact": "⚡ Intermittent Contact",
+            "thermal_runaway": "🔥 Thermal Runaway",
+            "pump_cavitation": "💧 Pump Cavitation",
+            "mixed_degradation": "🔀 Mixed Degradation",
+        }
+        
+        label = fault_labels.get(fault_type, fault_type)
+        self.status_label.setText(f"🔴 Generating {label} Data...")
+        
+        # Generate 5 minutes of fault data at 1Hz with 80% severity
+        self.current_data = generate_fault_sensor_data(
+            fault_type=fault_type,
+            n_samples=300,
+            base_value=25.0,
+            severity=0.8
+        )
+        
+        # Generate time axis
+        n_points = len(self.current_data)
+        self.sampling_rate = 1.0
+        time_axis = np.arange(n_points) / self.sampling_rate
+        
+        self.dashboard.oscilloscope.update_data(self.current_data, x=time_axis)
+        self.btn_analyze.setEnabled(True)
+        
+        self.panel_alarms.add_alarm(
+            datetime.now().strftime("%H:%M:%S"),
+            "WARNING",
+            "Simulation",
+            f"Generated {n_points} samples with fault: {label}"
+        )
+        
+        self.status_label.setText(f"🔴 Fault Data [{label}]: {n_points} samples")
         self.run_analysis_on_current_data()
 
     def run_analysis_on_current_data(self):
