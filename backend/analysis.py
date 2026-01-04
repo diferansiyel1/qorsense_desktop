@@ -14,6 +14,7 @@ Performance:
 - DFA vectorization provides ~10x speedup over loop-based implementation
 - All core calculations use NumPy broadcasting for efficiency
 """
+
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -48,9 +49,11 @@ IntArray = NDArray[np.integer[Any]]
 # ANALYSIS RESULT DATACLASS
 # =============================================================================
 
+
 @dataclass
 class AnalysisOutput:
     """Complete analysis output with error handling."""
+
     success: bool
     error_code: AnalysisErrorCode
     error_message: str | None
@@ -63,10 +66,11 @@ class AnalysisOutput:
 # SENSOR ANALYZER - INDUSTRIAL ENGINE
 # =============================================================================
 
+
 class SensorAnalyzer:
     """
     Industrial-grade sensor analysis engine.
-    
+
     Provides comprehensive analysis of process sensor signals including:
     - Drift detection (slope analysis)
     - Bias calculation (with calibration reference)
@@ -74,27 +78,27 @@ class SensorAnalyzer:
     - Long-range correlation (DFA/Hurst)
     - Hysteresis detection
     - Health scoring with configurable thresholds
-    
+
     Features:
     - Vectorized NumPy operations for performance
     - Configuration-driven thresholds per sensor type
     - Robust error handling with error codes
     - Full type hints for IDE support
-    
+
     Example:
         >>> from backend.models import SensorLimitConfig, get_sensor_limits
-        >>> 
+        >>>
         >>> # Use pH-specific thresholds
         >>> config = get_sensor_limits("pH")
         >>> analyzer = SensorAnalyzer(limit_config=config)
-        >>> 
+        >>>
         >>> # Analyze with reference calibration point
         >>> result = analyzer.analyze(
         ...     raw_data=sensor_values,
         ...     reference_value=7.0  # pH calibration point
         ... )
         >>> print(f"Health: {result['health']['score']}")
-    
+
     Attributes:
         config: Legacy SensorConfig (deprecated)
         limit_config: New SensorLimitConfig with sensor-specific thresholds
@@ -104,11 +108,11 @@ class SensorAnalyzer:
         self,
         config: SensorConfig | None = None,
         limit_config: SensorLimitConfig | None = None,
-        sensor_type: str = "Generic"
+        sensor_type: str = "Generic",
     ):
         """
         Initialize the analyzer.
-        
+
         Args:
             config: Legacy SensorConfig (deprecated, for backward compatibility)
             limit_config: New SensorLimitConfig with sensor-specific thresholds
@@ -132,27 +136,26 @@ class SensorAnalyzer:
     def preprocessing(self, data: list[float]) -> FloatArray:
         """
         Preprocessing pipeline with validation.
-        
+
         Steps:
         1. Convert to numpy array and validate
         2. Handle NaN/Inf gracefully
         3. Interpolate small gaps
         4. Apply median filter for spike removal
-        
+
         Args:
             data: Raw sensor data
-            
+
         Returns:
             Cleaned numpy array
-            
+
         Raises:
             ValueError: If data is insufficient or invalid
         """
         # Validate length
         if len(data) < self.limit_config.min_data_points:
             raise ValueError(
-                f"Insufficient data: {len(data)} points provided, "
-                f"minimum {self.limit_config.min_data_points} required."
+                f"Insufficient data: {len(data)} points provided, minimum {self.limit_config.min_data_points} required."
             )
 
         arr = np.array(data, dtype=np.float64)
@@ -165,7 +168,7 @@ class SensorAnalyzer:
                 raise ValueError(f"Too many NaN values: {nan_count}/{len(arr)}")
             # Interpolate NaN values
             s = pd.Series(arr)
-            arr = s.interpolate(method='linear', limit=5).bfill().ffill().values
+            arr = s.interpolate(method="linear", limit=5).bfill().ffill().values
 
         # Handle Inf values (clamp to reasonable range)
         inf_mask = np.isinf(arr)
@@ -181,7 +184,7 @@ class SensorAnalyzer:
 
         # Interpolation for gaps
         s = pd.Series(arr)
-        s = s.interpolate(method='linear', limit=5).bfill().ffill()
+        s = s.interpolate(method="linear", limit=5).bfill().ffill()
 
         # Median filter for spike removal
         kernel_size = min(5, len(arr) - 1)
@@ -198,23 +201,20 @@ class SensorAnalyzer:
     # =========================================================================
 
     def calc_bias(
-        self,
-        data: FloatArray,
-        reference_value: float | None = None,
-        window_fraction: float = 0.1
+        self, data: FloatArray, reference_value: float | None = None, window_fraction: float = 0.1
     ) -> BiasResult:
         """
         Calculate bias with optional calibration reference.
-        
+
         Two modes:
         1. Reference mode: Compare current mean to calibration reference
         2. Relative mode: Compare end window to start window
-        
+
         Args:
             data: Cleaned signal data
             reference_value: Calibration point (if None, uses start window mean)
             window_fraction: Fraction of data for window calculation
-            
+
         Returns:
             BiasResult with absolute, relative, and reference values
         """
@@ -239,12 +239,10 @@ class SensorAnalyzer:
         if abs(reference) > 1e-10:
             relative_bias = (absolute_bias / abs(reference)) * 100.0
         else:
-            relative_bias = 0.0 if abs(absolute_bias) < 1e-10 else float('inf')
+            relative_bias = 0.0 if abs(absolute_bias) < 1e-10 else float("inf")
 
         return BiasResult(
-            absolute=round(absolute_bias, 6),
-            relative=round(relative_bias, 4),
-            reference=round(reference, 6)
+            absolute=round(absolute_bias, 6), relative=round(relative_bias, 4), reference=round(reference, 6)
         )
 
     # =========================================================================
@@ -254,10 +252,10 @@ class SensorAnalyzer:
     def calc_slope(self, data: FloatArray) -> float:
         """
         Calculate linear trend slope using vectorized least squares.
-        
+
         Args:
             data: Signal data (typically the trend component)
-            
+
         Returns:
             Slope value (rate of change per sample)
         """
@@ -287,13 +285,13 @@ class SensorAnalyzer:
     def calc_snr_db(self, data: FloatArray) -> float:
         """
         Calculate Signal-to-Noise Ratio in dB.
-        
+
         Uses robust percentile-based signal estimation and
         detrended residuals for noise estimation.
-        
+
         Args:
             data: Cleaned signal data
-            
+
         Returns:
             SNR in decibels
         """
@@ -312,7 +310,7 @@ class SensorAnalyzer:
         trend = slope * x + intercept
 
         noise_component = data - trend
-        noise_rms = float(np.sqrt(np.mean(noise_component ** 2)))
+        noise_rms = float(np.sqrt(np.mean(noise_component**2)))
 
         if noise_rms < 1e-10:
             noise_rms = 1e-10
@@ -326,20 +324,17 @@ class SensorAnalyzer:
     # HYSTERESIS CALCULATION
     # =========================================================================
 
-    def calc_hysteresis(
-        self,
-        data: FloatArray
-    ) -> HysteresisResult:
+    def calc_hysteresis(self, data: FloatArray) -> HysteresisResult:
         """
         Calculate hysteresis based on rising vs falling edge behavior.
-        
+
         Detects asymmetric behavior between increasing and decreasing
         signal phases, which may indicate mechanical backlash or
         sensor response asymmetry.
-        
+
         Args:
             data: Cleaned signal data
-            
+
         Returns:
             HysteresisResult with score and edge values
         """
@@ -381,39 +376,31 @@ class SensorAnalyzer:
         hysteresis_score = abs(avg_rising - avg_falling) / data_range
 
         return HysteresisResult(
-            score=round(float(hysteresis_score), 4),
-            rising_values=rising_values,
-            falling_values=falling_values
+            score=round(float(hysteresis_score), 4), rising_values=rising_values, falling_values=falling_values
         )
 
     # =========================================================================
     # VECTORIZED DFA (PERFORMANCE OPTIMIZED)
     # =========================================================================
 
-    def calc_dfa(
-        self,
-        data: FloatArray,
-        order: int = 1,
-        min_scale: int = 4,
-        num_scales: int = 20
-    ) -> DFAResult:
+    def calc_dfa(self, data: FloatArray, order: int = 1, min_scale: int = 4, num_scales: int = 20) -> DFAResult:
         """
         Vectorized Detrended Fluctuation Analysis.
-        
+
         Uses NumPy broadcasting and vectorized least squares to
         achieve ~10x speedup over loop-based implementation.
-        
+
         The Hurst exponent indicates:
         - H ≈ 0.5: Random walk (uncorrelated)
         - H > 0.5: Persistent behavior (trending)
         - H < 0.5: Anti-persistent (mean-reverting)
-        
+
         Args:
             data: Detrended signal (typically residuals)
             order: Polynomial order for local detrending (default 1)
             min_scale: Minimum scale for analysis
             num_scales: Number of scales to evaluate
-            
+
         Returns:
             DFAResult with Hurst exponent, R², scales, and fluctuations
         """
@@ -431,13 +418,7 @@ class SensorAnalyzer:
                 return DFAResult(hurst=0.5, r_squared=0.0, scales=[], fluctuations=[])
 
             # Generate log-spaced scales
-            scales = np.unique(
-                np.logspace(
-                    np.log10(min_scale),
-                    np.log10(max_scale),
-                    num=num_scales
-                ).astype(np.int64)
-            )
+            scales = np.unique(np.logspace(np.log10(min_scale), np.log10(max_scale), num=num_scales).astype(np.int64))
             scales = scales[scales > order + 2]
 
             if len(scales) < 2:
@@ -465,31 +446,26 @@ class SensorAnalyzer:
 
             return DFAResult(
                 hurst=round(float(slope), 4),
-                r_squared=round(float(r_value ** 2), 4),
+                r_squared=round(float(r_value**2), 4),
                 scales=valid_scales.tolist(),
-                fluctuations=valid_flucts.tolist()
+                fluctuations=valid_flucts.tolist(),
             )
 
         except Exception as e:
             logger.warning(f"DFA calculation error: {e}")
             return DFAResult(hurst=0.5, r_squared=0.0, scales=[], fluctuations=[])
 
-    def _calc_fluctuation_vectorized(
-        self,
-        y: FloatArray,
-        scale: int,
-        order: int
-    ) -> float:
+    def _calc_fluctuation_vectorized(self, y: FloatArray, scale: int, order: int) -> float:
         """
         Calculate fluctuation for a single scale using vectorized operations.
-        
+
         Uses Vandermonde matrix approach for batch polynomial fitting.
-        
+
         Args:
             y: Integrated signal
             scale: Window size
             order: Polynomial order
-            
+
         Returns:
             RMS fluctuation at this scale
         """
@@ -500,7 +476,7 @@ class SensorAnalyzer:
             return 0.0
 
         # Reshape into segments
-        segments = y[:n_segments * scale].reshape(n_segments, scale)
+        segments = y[: n_segments * scale].reshape(n_segments, scale)
 
         # Create Vandermonde matrix for polynomial fitting
         x = np.arange(scale, dtype=np.float64)
@@ -524,7 +500,7 @@ class SensorAnalyzer:
             residuals = segments.T - trends  # (scale, n_segments)
 
             # RMS fluctuation
-            rms = np.sqrt(np.mean(residuals ** 2))
+            rms = np.sqrt(np.mean(residuals**2))
 
             return float(rms)
 
@@ -542,19 +518,16 @@ class SensorAnalyzer:
     # SIGNAL DECOMPOSITION
     # =========================================================================
 
-    def decompose_signal(
-        self,
-        data: FloatArray
-    ) -> tuple[FloatArray, FloatArray]:
+    def decompose_signal(self, data: FloatArray) -> tuple[FloatArray, FloatArray]:
         """
         Decompose signal into trend and residuals.
-        
+
         Uses Savitzky-Golay filter for smooth trend extraction
         with automatic parameter selection based on data length.
-        
+
         Args:
             data: Cleaned signal data
-            
+
         Returns:
             Tuple of (trend, residuals) arrays
         """
@@ -587,14 +560,10 @@ class SensorAnalyzer:
     # HEALTH SCORING (CONFIGURATION-DRIVEN)
     # =========================================================================
 
-    def get_health_score(
-        self,
-        metrics: dict[str, Any],
-        config: SensorLimitConfig | None = None
-    ) -> HealthResult:
+    def get_health_score(self, metrics: dict[str, Any], config: SensorLimitConfig | None = None) -> HealthResult:
         """
         Calculate health score using configuration-driven thresholds.
-        
+
         All thresholds are read from SensorLimitConfig, eliminating
         hardcoded values. Scoring is based on:
         - Slope (drift) penalties
@@ -602,11 +571,11 @@ class SensorAnalyzer:
         - Noise penalties
         - SNR penalties
         - DFA/Hurst penalties
-        
+
         Args:
             metrics: Dictionary of calculated metrics
             config: Optional specific configuration (uses instance config if None)
-            
+
         Returns:
             HealthResult with score, status, diagnosis, flags, and penalties
         """
@@ -750,30 +719,25 @@ class SensorAnalyzer:
             diagnosis="; ".join(diagnosis),
             flags=flags,
             recommendation=recommendation,
-            penalties=penalties
+            penalties=penalties,
         )
 
     # =========================================================================
     # RUL CALCULATION
     # =========================================================================
 
-    def calc_rul(
-        self,
-        trend: FloatArray,
-        slope: float,
-        reference_value: float | None = None
-    ) -> str:
+    def calc_rul(self, trend: FloatArray, slope: float, reference_value: float | None = None) -> str:
         """
         Calculate Remaining Useful Life based on trend projection.
-        
+
         Projects current trend to estimate when critical threshold
         will be exceeded.
-        
+
         Args:
             trend: Trend component of signal
             slope: Calculated slope
             reference_value: Reference for threshold calculation
-            
+
         Returns:
             Human-readable RUL estimate
         """
@@ -819,29 +783,26 @@ class SensorAnalyzer:
     # =========================================================================
 
     def analyze(
-        self,
-        raw_data: list[float],
-        reference_value: float | None = None,
-        sensor_type: str | None = None
+        self, raw_data: list[float], reference_value: float | None = None, sensor_type: str | None = None
     ) -> dict[str, Any]:
         """
         Complete analysis pipeline with robust error handling.
-        
+
         Steps:
         1. Preprocessing (validation, cleaning)
         2. Signal decomposition (trend + residuals)
         3. Metric calculation (bias, slope, noise, DFA, hysteresis)
         4. Health scoring with configuration-driven thresholds
         5. RUL prediction
-        
+
         Args:
             raw_data: Raw sensor values
             reference_value: Optional calibration reference for bias
             sensor_type: Optional sensor type for automatic threshold selection
-            
+
         Returns:
             Complete analysis result dictionary
-            
+
         Example:
             >>> analyzer = SensorAnalyzer(sensor_type="pH")
             >>> result = analyzer.analyze(
@@ -886,7 +847,7 @@ class SensorAnalyzer:
                 "bias_result": {
                     "absolute": bias_result.absolute,
                     "relative": bias_result.relative,
-                    "reference": bias_result.reference
+                    "reference": bias_result.reference,
                 },
                 "slope": slope,
                 "noise_std": noise_std,
@@ -900,7 +861,7 @@ class SensorAnalyzer:
                 "dfa_fluctuations": dfa_result.fluctuations,
                 "trend": trend.tolist(),
                 "residuals": residuals.tolist(),
-                "error_code": AnalysisErrorCode.SUCCESS.value
+                "error_code": AnalysisErrorCode.SUCCESS.value,
             }
 
             # 4. Health scoring
@@ -917,11 +878,11 @@ class SensorAnalyzer:
                     "diagnosis": health.diagnosis,
                     "flags": health.flags,
                     "recommendation": health.recommendation,
-                    "penalties": health.penalties
+                    "penalties": health.penalties,
                 },
                 "prediction": rul,
                 "error_code": AnalysisErrorCode.SUCCESS.value,
-                "error_message": None
+                "error_message": None,
             }
 
         except ValueError as e:
@@ -946,7 +907,7 @@ class SensorAnalyzer:
                 "health": None,
                 "prediction": None,
                 "error_code": error_code.value,
-                "error_message": error_msg
+                "error_message": error_msg,
             }
 
         except Exception as e:
@@ -957,5 +918,5 @@ class SensorAnalyzer:
                 "health": None,
                 "prediction": None,
                 "error_code": AnalysisErrorCode.COMPUTATION_ERROR.value,
-                "error_message": str(e)
+                "error_message": str(e),
             }

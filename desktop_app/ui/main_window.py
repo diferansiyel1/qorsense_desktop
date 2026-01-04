@@ -449,6 +449,9 @@ class QorSenseMainWindow(QMainWindow):
         self.panel_explorer = FieldExplorerPanel(self)
         self.panel_explorer.sensor_selected.connect(self.on_sensor_selected)
         self.panel_explorer.load_csv_requested.connect(self.on_csv_load_requested)
+        self.panel_explorer.live_sensor_settings_requested.connect(self._show_live_sensor_settings)
+        self.panel_explorer.live_sensor_disconnect_requested.connect(self._disconnect_live_sensor)
+        self.panel_explorer.live_sensor_selected.connect(self._on_live_sensor_selected)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.panel_explorer)
 
         # Sensor Status Panel (for multi-sensor monitoring)
@@ -1069,6 +1072,7 @@ class QorSenseMainWindow(QMainWindow):
             self.multi_oscilloscope.remove_sensor(sensor_id)
         self.sensor_status_panel.clear_all()
         self.sensor_status_panel.setVisible(False)
+        self.panel_explorer.clear_live_sensors()  # Clear live sensors from left panel
 
         # Restore original oscilloscope in dashboard
         self.dashboard.splitter.replaceWidget(0, self.dashboard.oscilloscope)
@@ -1225,10 +1229,18 @@ class QorSenseMainWindow(QMainWindow):
 
             sensor_configs.append(WorkerSensorConfig(**config_dict))
 
-        # Add sensors to UI components
+        # Add sensors to UI components (including Field Explorer)
         for sensor in sensors:
-            self.multi_oscilloscope.add_sensor(sensor["name"], sensor["name"])
-            self.sensor_status_panel.add_sensor(sensor["name"], sensor["name"])
+            sensor_name = sensor["name"]
+            # Build config for storage
+            sensor_config = {
+                "connection_type": connection_type,
+                "connection_params": connection_params,
+                "sensor": sensor
+            }
+            self.multi_oscilloscope.add_sensor(sensor_name, sensor_name)
+            self.sensor_status_panel.add_sensor(sensor_name, sensor_name)
+            self.panel_explorer.add_live_sensor(sensor_name, sensor_name, sensor_config, "connecting")
 
         # Create and start ModbusWorker with multiple sensors
         self.modbus_worker = ModbusWorker(sensors=sensor_configs)
@@ -1301,11 +1313,21 @@ class QorSenseMainWindow(QMainWindow):
         """Handle device status changes from worker."""
         status_text = status.lower()
         self.sensor_status_panel.set_sensor_status(sensor_id, status_text)
+        self.panel_explorer.update_live_sensor_status(sensor_id, status_text)
 
     def _on_live_sensor_selected(self, sensor_id: str):
-        """Handle sensor selection from status panel."""
+        """Handle sensor selection from status panel or Field Explorer."""
         self._selected_live_sensor = sensor_id
-        self.live_data_buffer = list(self.multi_oscilloscope.get_sensor_data(sensor_id))
+
+        # Try to get data buffer from multi_oscilloscope if available
+        if hasattr(self.multi_oscilloscope, 'get_sensor_data'):
+            try:
+                self.live_data_buffer = list(self.multi_oscilloscope.get_sensor_data(sensor_id))
+            except Exception:
+                self.live_data_buffer = []
+        else:
+            self.live_data_buffer = []
+
         self.live_sample_count = 0
 
         self.status_label.setText(f"Selected: {sensor_id}")
@@ -1315,4 +1337,52 @@ class QorSenseMainWindow(QMainWindow):
             "SensorSelect",
             f"Switched analysis target to: {sensor_id}"
         )
+
+    def _show_live_sensor_settings(self, sensor_id: str):
+        """Show connection settings dialog for a live sensor."""
+        config = self.panel_explorer.get_live_sensor_config(sensor_id)
+        if not config:
+            QMessageBox.information(
+                self,
+                "Sensor Settings",
+                f"Sensor: {sensor_id}\n\nNo configuration data available."
+            )
+            return
+
+        # Build info string from config
+        conn_type = config.get("connection_type", "Unknown")
+        conn_params = config.get("connection_params", {})
+        sensor_info = config.get("sensor", {})
+
+        if conn_type == "TCP":
+            conn_str = f"IP: {conn_params.get('ip_address', 'N/A')}:{conn_params.get('tcp_port', 502)}"
+        else:
+            conn_str = f"Port: {conn_params.get('serial_port', 'N/A')} @ {conn_params.get('baudrate', 19200)}bps"
+
+        info_text = f"""Sensor: {sensor_id}
+
+Connection Type: {conn_type}
+{conn_str}
+
+Register Address: {sensor_info.get('register_address', 'N/A')}
+Data Type: {sensor_info.get('data_type', 'N/A')}
+Scale Factor: {sensor_info.get('scale_factor', 1.0)}
+"""
+
+        QMessageBox.information(self, f"Settings: {sensor_id}", info_text)
+
+    def _disconnect_live_sensor(self, sensor_id: str):
+        """Disconnect a single live sensor (stops all monitoring for now)."""
+        # For simplicity, disconnect all monitoring
+        # A more advanced implementation would support per-sensor disconnect
+        reply = QMessageBox.question(
+            self,
+            "Disconnect Sensor",
+            f"Disconnect '{sensor_id}'?\n\nNote: This will stop all live monitoring.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.stop_live_monitoring()
 

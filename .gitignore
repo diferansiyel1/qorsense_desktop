@@ -37,3 +37,4 @@ Thumbs.db
 backend.log
 *.db
 license.dat
+data/

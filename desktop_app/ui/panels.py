@@ -156,6 +156,12 @@ class FieldExplorerPanel(QDockWidget):
     sensor_selected = pyqtSignal(str)
     # Signal emitted when CSV loading is requested for a sensor
     load_csv_requested = pyqtSignal(str)
+    # Signal emitted when live sensor settings are requested
+    live_sensor_settings_requested = pyqtSignal(str)  # sensor_id
+    # Signal emitted when live sensor disconnect is requested
+    live_sensor_disconnect_requested = pyqtSignal(str)  # sensor_id
+    # Signal emitted when a live sensor is selected
+    live_sensor_selected = pyqtSignal(str)  # sensor_id
 
     def __init__(self, parent=None):
         super().__init__("Field Explorer", parent)
@@ -166,6 +172,11 @@ class FieldExplorerPanel(QDockWidget):
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.show_context_menu)
         self.tree.itemClicked.connect(self.on_item_clicked)
+
+        # Live sensors tracking
+        self.live_sensors_root = None  # Root item for live sensors section
+        self.live_sensor_items = {}  # {sensor_id: QTreeWidgetItem}
+        self.live_sensor_configs = {}  # {sensor_id: config_dict}
 
         # Load or Init
         self.assets_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets.json")
@@ -183,6 +194,12 @@ class FieldExplorerPanel(QDockWidget):
 
     def on_item_clicked(self, item, column):
         """Handle item selection"""
+        # Check if this is a live sensor
+        sensor_id = item.data(0, Qt.ItemDataRole.UserRole + 1)  # Live sensor ID
+        if sensor_id and sensor_id in self.live_sensor_items:
+            self.live_sensor_selected.emit(sensor_id)
+            return
+
         # Only emit for leaf nodes (sensors)
         if item.childCount() == 0:
             path = self.get_item_path(item)
@@ -192,7 +209,34 @@ class FieldExplorerPanel(QDockWidget):
         item = self.tree.itemAt(position)
         menu = QMenu()
 
-        # Actions
+        # Check if this is a live sensor item
+        if item:
+            sensor_id = item.data(0, Qt.ItemDataRole.UserRole + 1)  # Live sensor ID
+            if sensor_id and sensor_id in self.live_sensor_items:
+                # Live sensor context menu
+                settings_action = QAction("⚙️ Connection Settings", self)
+                settings_action.triggered.connect(lambda: self.live_sensor_settings_requested.emit(sensor_id))
+                menu.addAction(settings_action)
+
+                view_action = QAction("📊 View Data", self)
+                view_action.triggered.connect(lambda: self.live_sensor_selected.emit(sensor_id))
+                menu.addAction(view_action)
+
+                menu.addSeparator()
+
+                disconnect_action = QAction("🔌 Disconnect", self)
+                disconnect_action.triggered.connect(lambda: self.live_sensor_disconnect_requested.emit(sensor_id))
+                menu.addAction(disconnect_action)
+
+                menu.exec(self.tree.viewport().mapToGlobal(position))
+                return
+
+            # Check if this is the live sensors root (prevent modification)
+            if item == self.live_sensors_root:
+                # No context menu for the live sensors root itself
+                return
+
+        # Actions for regular items
         add_factory_action = QAction("Add Factory", self)
         add_factory_action.triggered.connect(self.add_factory)
 
@@ -225,12 +269,12 @@ class FieldExplorerPanel(QDockWidget):
                 curr = curr.parent()
                 level += 1
 
-            if level == 0: # Factory level
-                 menu.addAction(add_line_action)
-            elif level == 1: # Line level (can hold sensors)
-                 menu.addAction(add_sensor_action)
-            elif level == 2: # Sensor level (leaf node)
-                 menu.addAction(load_csv_action)
+            if level == 0:  # Factory level
+                menu.addAction(add_line_action)
+            elif level == 1:  # Line level (can hold sensors)
+                menu.addAction(add_sensor_action)
+            elif level == 2:  # Sensor level (leaf node)
+                menu.addAction(load_csv_action)
 
             menu.addSeparator()
             menu.addAction(remove_action)
@@ -370,7 +414,134 @@ class FieldExplorerPanel(QDockWidget):
         root.setExpanded(True)
         item1.setExpanded(True)
 
+    # =========================================================================
+    # LIVE SENSOR MANAGEMENT
+    # =========================================================================
+
+    def add_live_sensor(self, sensor_id: str, display_name: str = None, config: dict = None, status: str = "connecting"):
+        """
+        Add a live sensor to the tree under 'Live Sensors' root.
+
+        Args:
+            sensor_id: Unique sensor identifier
+            display_name: Human-readable name (defaults to sensor_id)
+            config: Connection configuration dict to store
+            status: Initial status ('connecting', 'online', 'offline', 'error')
+        """
+        # Create live sensors root if it doesn't exist
+        if self.live_sensors_root is None:
+            self.live_sensors_root = QTreeWidgetItem(self.tree)
+            self.live_sensors_root.setText(0, "🔴 Live Sensors")
+            self.live_sensors_root.setForeground(0, QColor("#ff6600"))
+            # Insert at top of tree
+            self.tree.insertTopLevelItem(0, self.tree.takeTopLevelItem(
+                self.tree.indexOfTopLevelItem(self.live_sensors_root)
+            ))
+            self.live_sensors_root.setExpanded(True)
+
+        # Check if sensor already exists
+        if sensor_id in self.live_sensor_items:
+            return
+
+        # Create sensor item
+        name = display_name or sensor_id
+        status_icon = self._get_status_icon(status)
+        item = QTreeWidgetItem(self.live_sensors_root, [f"{status_icon} {name}"])
+
+        # Store sensor_id in item data for identification
+        item.setData(0, Qt.ItemDataRole.UserRole + 1, sensor_id)
+
+        # Store config
+        if config:
+            self.live_sensor_configs[sensor_id] = config
+
+        self.live_sensor_items[sensor_id] = item
+        self.live_sensors_root.setExpanded(True)
+
+    def remove_live_sensor(self, sensor_id: str):
+        """Remove a single live sensor from the tree."""
+        if sensor_id in self.live_sensor_items:
+            item = self.live_sensor_items.pop(sensor_id)
+            if self.live_sensors_root:
+                self.live_sensors_root.removeChild(item)
+
+            # Remove config
+            self.live_sensor_configs.pop(sensor_id, None)
+
+            # Hide root if no more live sensors
+            if self.live_sensors_root and self.live_sensors_root.childCount() == 0:
+                idx = self.tree.indexOfTopLevelItem(self.live_sensors_root)
+                if idx >= 0:
+                    self.tree.takeTopLevelItem(idx)
+                self.live_sensors_root = None
+
+    def clear_live_sensors(self):
+        """Remove all live sensors from the tree."""
+        for sensor_id in list(self.live_sensor_items.keys()):
+            self.remove_live_sensor(sensor_id)
+
+        self.live_sensor_items.clear()
+        self.live_sensor_configs.clear()
+
+        # Remove root
+        if self.live_sensors_root:
+            idx = self.tree.indexOfTopLevelItem(self.live_sensors_root)
+            if idx >= 0:
+                self.tree.takeTopLevelItem(idx)
+            self.live_sensors_root = None
+
+    def update_live_sensor_status(self, sensor_id: str, status: str):
+        """
+        Update the status indicator of a live sensor.
+
+        Args:
+            sensor_id: Sensor identifier
+            status: 'online', 'offline', 'connecting', 'error', 'reconnecting'
+        """
+        if sensor_id not in self.live_sensor_items:
+            return
+
+        item = self.live_sensor_items[sensor_id]
+        current_text = item.text(0)
+
+        # Extract name (remove old status icon)
+        name = current_text
+        for icon in ["🟢", "🔴", "🟡", "⚠️", "🔄"]:
+            if current_text.startswith(icon):
+                name = current_text[len(icon):].strip()
+                break
+
+        status_icon = self._get_status_icon(status)
+        item.setText(0, f"{status_icon} {name}")
+
+        # Update color based on status
+        color_map = {
+            "online": QColor("#32c850"),
+            "offline": QColor("#cc3333"),
+            "connecting": QColor("#ff9500"),
+            "reconnecting": QColor("#ff9500"),
+            "error": QColor("#cc3333"),
+        }
+        item.setForeground(0, color_map.get(status, QColor("#ffffff")))
+
+    def get_live_sensor_config(self, sensor_id: str) -> dict:
+        """Get stored configuration for a live sensor."""
+        return self.live_sensor_configs.get(sensor_id, {})
+
+    def _get_status_icon(self, status: str) -> str:
+        """Get status icon for display."""
+        icons = {
+            "online": "🟢",
+            "offline": "🔴",
+            "connecting": "🟡",
+            "reconnecting": "🔄",
+            "error": "⚠️",
+        }
+        return icons.get(status.lower(), "🟡")
+
+
 class AlarmPanel(QDockWidget):
+
     def __init__(self, parent=None):
         super().__init__("Alarms & Events", parent)
         self.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.TopDockWidgetArea)

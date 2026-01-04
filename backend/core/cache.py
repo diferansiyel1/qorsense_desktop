@@ -58,7 +58,7 @@ def cache(ttl_seconds: int = 300, key_prefix: str = ""):
                     cached_data = await r.get(cache_key)
                     if cached_data:
                         logger.debug(f"Cache hit: {cache_key}")
-                        return pickle.loads(cached_data)
+                        return pickle.loads(cached_data)  # nosec B301 - internal cache, we serialize
                 except Exception as e:
                     logger.warning(f"Cache get error: {e}")
 

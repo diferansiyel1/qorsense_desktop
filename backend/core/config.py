@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     environment: str = Field(default="development", description="Environment: development, staging, production")
 
     # Backend Settings
-    backend_host: str = Field(default="0.0.0.0", description="Backend host")
+    backend_host: str = Field(default="0.0.0.0", description="Backend host")  # nosec B104 - local desktop
     backend_port: int = Field(default=8000, ge=1024, le=65535, description="Backend port")
     backend_reload: bool = Field(default=True, description="Enable auto-reload")
 
