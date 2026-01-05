@@ -1040,6 +1040,34 @@ class QorSenseMainWindow(QMainWindow):
 
         # Start worker
         self.modbus_worker.start()
+        
+        # --- SINGLE SENSOR INTEGRATION START ---
+        # Define a consistent Sensor ID and Name for single Mode
+        sensor_name = config.get("sensor_name", f"Sensor-{connection_type}")
+        sensor_id = sensor_name # Use name as ID for simplicity in single mode
+        
+        # Build config for storage/viewing settings later
+        sensor_config = {
+            "connection_type": connection_type,
+            "connection_params": config,
+            "sensor": {
+                "name": sensor_name,
+                "register_address": config.get("register_address", 0),
+                "data_type": config.get("data_type", "float32"),
+                "scale_factor": config.get("scale_factor", 1.0)
+            }
+        }
+
+        # Add to Field Explorer
+        self.panel_explorer.add_live_sensor(sensor_id, sensor_id, sensor_config, "connecting")
+        
+        # Set as selected for analysis
+        self._selected_live_sensor = sensor_id
+        
+        # Add to status panel as well for consistency (optional but good for UX)
+        self.sensor_status_panel.setVisible(True)
+        self.sensor_status_panel.add_sensor(sensor_id, sensor_id)
+        # --- SINGLE SENSOR INTEGRATION END ---
 
         # Update UI
         self.btn_stop_live.setVisible(True)
