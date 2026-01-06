@@ -411,6 +411,7 @@ class QorSenseMainWindow(QMainWindow):
         self.ANALYSIS_TRIGGER_COUNT = 60  # Trigger analysis every 60 samples (1 minute at 1Hz)
         self.is_live_mode = False  # Flag for live monitoring mode
         self._selected_live_sensor = None  # Currently selected sensor for analysis
+        self._sensor_metadata = {}  # {sensor_id: {unit, name, ...}} for storing sensor units
 
         # --- UI SETUP ---
         self.setup_ui()
@@ -623,11 +624,13 @@ class QorSenseMainWindow(QMainWindow):
         self.loader_worker = FileLoadWorker(filepath)
         self.loader_worker.finished.connect(self.on_file_loaded)
         self.loader_worker.error.connect(self.on_load_error)
+        # Ensure proper cleanup when thread finishes to prevent "QThread destroyed while running"
+        self.loader_worker.finished.connect(self._cleanup_loader_worker)
+        self.loader_worker.error.connect(self._cleanup_loader_worker)
         self.loader_worker.start()
 
     def on_file_loaded(self, data_dict, filepath):
         self.progress_bar.setVisible(False)
-        self.loader_worker = None
 
         try:
             # Smart Column Selection from the Loaded Data Dictionary
@@ -773,7 +776,6 @@ class QorSenseMainWindow(QMainWindow):
 
     def on_load_error(self, error_msg):
         self.progress_bar.setVisible(False)
-        self.loader_worker = None
         self.status_label.setText("Load Failed")
 
         if "Out of memory" in error_msg:
@@ -782,6 +784,14 @@ class QorSenseMainWindow(QMainWindow):
              QMessageBox.critical(self, "Load Error", f"Could not load file:\n{error_msg}")
 
         logger.error(f"File load error: {error_msg}")
+
+    def _cleanup_loader_worker(self, *args):
+        """Properly cleanup loader worker thread to prevent crash."""
+        if self.loader_worker:
+            if self.loader_worker.isRunning():
+                self.loader_worker.quit()
+                self.loader_worker.wait(1000)  # Wait max 1 second
+            self.loader_worker = None
 
     def trigger_demo_mode(self):
         """Legacy demo mode - redirects to healthy simulation."""
@@ -1260,13 +1270,19 @@ class QorSenseMainWindow(QMainWindow):
         # Add sensors to UI components (including Field Explorer)
         for sensor in sensors:
             sensor_name = sensor["name"]
+            sensor_unit = sensor.get("unit", "V")
             # Build config for storage
             sensor_config = {
                 "connection_type": connection_type,
                 "connection_params": connection_params,
                 "sensor": sensor
             }
-            self.multi_oscilloscope.add_sensor(sensor_name, sensor_name)
+            # Store sensor metadata for Y-axis label updates
+            self._sensor_metadata[sensor_name] = {
+                "unit": sensor_unit,
+                "name": sensor_name
+            }
+            self.multi_oscilloscope.add_sensor(sensor_name, sensor_name, unit=sensor_unit)
             self.sensor_status_panel.add_sensor(sensor_name, sensor_name)
             self.panel_explorer.add_live_sensor(sensor_name, sensor_name, sensor_config, "connecting")
 
@@ -1346,6 +1362,10 @@ class QorSenseMainWindow(QMainWindow):
     def _on_live_sensor_selected(self, sensor_id: str):
         """Handle sensor selection from status panel or Field Explorer."""
         self._selected_live_sensor = sensor_id
+
+        # Update multi-oscilloscope Y-axis label for selected sensor
+        if hasattr(self.multi_oscilloscope, 'select_sensor'):
+            self.multi_oscilloscope.select_sensor(sensor_id)
 
         # Try to get data buffer from multi_oscilloscope if available
         if hasattr(self.multi_oscilloscope, 'get_sensor_data'):

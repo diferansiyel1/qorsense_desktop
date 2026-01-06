@@ -148,9 +148,9 @@ class MultiSensorConnectionDialog(QDialog):
         sensor_layout = QVBoxLayout(sensor_group)
 
         # Table
-        self.sensor_table = QTableWidget(0, 8)
+        self.sensor_table = QTableWidget(0, 9)
         self.sensor_table.setHorizontalHeaderLabels([
-            "Name", "Slave ID", "Register", "Reg Count", "Offset", "Data Type", "Scale", ""
+            "Name", "Slave ID", "Register", "Reg Count", "Offset", "Data Type", "Scale", "Unit", ""
         ])
         self.sensor_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.sensor_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -159,8 +159,9 @@ class MultiSensorConnectionDialog(QDialog):
         self.sensor_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.sensor_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.sensor_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        self.sensor_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        self.sensor_table.setColumnWidth(7, 60)
+        self.sensor_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        self.sensor_table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
+        self.sensor_table.setColumnWidth(8, 60)
         self.sensor_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.sensor_table.setAlternatingRowColors(True)
         sensor_layout.addWidget(self.sensor_table)
@@ -247,11 +248,18 @@ class MultiSensorConnectionDialog(QDialog):
         scale_spin.setDecimals(4)
         self.sensor_table.setCellWidget(row, 6, scale_spin)
 
+        # Unit
+        unit_input = QLineEdit("V")
+        unit_input.setPlaceholderText("e.g., °C, mg/L, bar")
+        unit_input.setToolTip("Measurement unit for this sensor")
+        unit_input.setMaximumWidth(80)
+        self.sensor_table.setCellWidget(row, 7, unit_input)
+
         # Remove Button
         btn_remove = QPushButton("✖")
         btn_remove.setFixedWidth(40)
         btn_remove.clicked.connect(lambda: self._remove_sensor_row(row))
-        self.sensor_table.setCellWidget(row, 7, btn_remove)
+        self.sensor_table.setCellWidget(row, 8, btn_remove)
 
     def _remove_sensor_row(self, row: int):
         """Remove sensor row."""
@@ -261,7 +269,7 @@ class MultiSensorConnectionDialog(QDialog):
         self.sensor_table.removeRow(row)
         # Update remove button connections
         for r in range(self.sensor_table.rowCount()):
-            btn = self.sensor_table.cellWidget(r, 7)
+            btn = self.sensor_table.cellWidget(r, 8)
             if btn:
                 btn.clicked.disconnect()
                 btn.clicked.connect(lambda checked, row=r: self._remove_sensor_row(row))
@@ -313,7 +321,7 @@ class MultiSensorConnectionDialog(QDialog):
         Return list of sensor configurations.
         
         Returns:
-            List of dicts with keys: name, register_address, data_type, scale_factor
+            List of dicts with keys: name, register_address, data_type, scale_factor, unit
         """
         sensors = []
         for row in range(self.sensor_table.rowCount()):
@@ -324,6 +332,7 @@ class MultiSensorConnectionDialog(QDialog):
             offset_widget = self.sensor_table.cellWidget(row, 4)
             type_widget = self.sensor_table.cellWidget(row, 5)
             scale_widget = self.sensor_table.cellWidget(row, 6)
+            unit_widget = self.sensor_table.cellWidget(row, 7)
 
             sensors.append({
                 "name": name_item.text().strip() if name_item else f"Sensor_{row+1}",
@@ -332,6 +341,7 @@ class MultiSensorConnectionDialog(QDialog):
                 "register_count": count_widget.value() if count_widget else 10,
                 "value_register_offset": offset_widget.value() if offset_widget else 2,
                 "data_type": type_widget.currentText() if type_widget else "FLOAT32_WS",
-                "scale_factor": scale_widget.value() if scale_widget else 1.0
+                "scale_factor": scale_widget.value() if scale_widget else 1.0,
+                "unit": unit_widget.text().strip() if unit_widget else "V"
             })
         return sensors

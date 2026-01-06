@@ -71,7 +71,7 @@ class FileLoadWorker(QThread):
                          file_buffer.seek(0)
                          # Explicitly check for whitespace delimiter common in text data files
                          try:
-                             df_white = pd.read_csv(file_buffer, delim_whitespace=True)
+                             df_white = pd.read_csv(file_buffer, sep=r'\s+')
                              if len(df_white.columns) > 1:
                                  df = df_white
                              else:

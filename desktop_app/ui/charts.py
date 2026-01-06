@@ -4,11 +4,13 @@ from PyQt6.QtWidgets import QSplitter, QVBoxLayout, QWidget
 
 
 class OscilloscopeWidget(pg.PlotWidget):
-    def __init__(self, parent=None, max_points: int = 300):
+    def __init__(self, parent=None, max_points: int = 300, y_unit: str = "V", y_label: str = "Amplitude"):
         super().__init__(parent=parent, title="Raw Sensor Signal (Oscilloscope Mode)")
         self.setBackground('#1e1e1e')
         self.showGrid(x=True, y=True, alpha=0.3)
-        self.setLabel('left', 'Amplitude', units='V')
+        self._y_unit = y_unit
+        self._y_label = y_label
+        self.setLabel('left', y_label, units=y_unit)
         self.setLabel('bottom', 'Time', units='s')
         self.curve = self.plot(pen=pg.mkPen(color='#00ffff', width=2, style=Qt.PenStyle.SolidLine))
 
@@ -16,6 +18,19 @@ class OscilloscopeWidget(pg.PlotWidget):
         self.max_points = max_points
         self.data_buffer = []
         self.time_buffer = []
+
+    def set_y_unit(self, unit: str, label: str = None):
+        """
+        Update the Y-axis unit and optionally the label.
+        
+        Args:
+            unit: The unit string (e.g., 'V', '°C', 'mg/L')
+            label: Optional label text (e.g., 'Temperature', 'Dissolved Oxygen')
+        """
+        self._y_unit = unit
+        if label is not None:
+            self._y_label = label
+        self.setLabel('left', self._y_label, units=self._y_unit)
 
     def update_data(self, data, x=None):
         """Update with full dataset (batch mode)."""
@@ -74,12 +89,13 @@ class MultiSensorOscilloscope(pg.PlotWidget):
     - Unique color per sensor
     - Legend with sensor names
     - Independent data buffers per sensor
+    - Per-sensor unit display on Y-axis
     - Click to select sensor
     
     Example:
         >>> scope = MultiSensorOscilloscope(max_points=300)
-        >>> scope.add_sensor("ph_sensor", "pH Sensor")
-        >>> scope.add_sensor("temperature", "Temperature")
+        >>> scope.add_sensor("ph_sensor", "pH Sensor", unit="pH")
+        >>> scope.add_sensor("temperature", "Temperature", unit="°C")
         >>> scope.update_sensor("ph_sensor", 7.12, time.time())
     """
 
@@ -106,12 +122,15 @@ class MultiSensorOscilloscope(pg.PlotWidget):
         super().__init__(parent=parent, title="Multi-Sensor Live Data")
         self.setBackground('#1e1e1e')
         self.showGrid(x=True, y=True, alpha=0.3)
-        self.setLabel('left', 'Value')
+        self._current_y_label = 'Value'
+        self._current_y_unit = ''
+        self.setLabel('left', self._current_y_label)
         self.setLabel('bottom', 'Time', units='s')
 
         self.max_points = max_points
-        self.sensors: dict = {}  # {sensor_id: {curve, data, time, color, name}}
+        self.sensors: dict = {}  # {sensor_id: {curve, data, time, color, name, unit}}
         self._color_index = 0
+        self._selected_sensor_id = None  # For Y-label display
 
         # Add legend
         self.legend = self.addLegend(offset=(10, 10))
@@ -119,7 +138,7 @@ class MultiSensorOscilloscope(pg.PlotWidget):
         # Enable mouse tracking for tooltips
         self.setMouseEnabled(x=True, y=True)
 
-    def add_sensor(self, sensor_id: str, display_name: str = None, color: str = None) -> None:
+    def add_sensor(self, sensor_id: str, display_name: str = None, color: str = None, unit: str = "") -> None:
         """
         Add a new sensor trace to the graph.
         
@@ -127,6 +146,7 @@ class MultiSensorOscilloscope(pg.PlotWidget):
             sensor_id: Unique sensor identifier
             display_name: Name shown in legend (defaults to sensor_id)
             color: Hex color code (auto-assigned if None)
+            unit: Unit for this sensor's values (e.g., '°C', 'mg/L', 'bar')
         """
         if sensor_id in self.sensors:
             return  # Already exists
@@ -144,14 +164,20 @@ class MultiSensorOscilloscope(pg.PlotWidget):
             name=name
         )
 
-        # Store sensor info
+        # Store sensor info with unit
         self.sensors[sensor_id] = {
             'curve': curve,
             'data': [],
             'time': [],
             'color': color,
-            'name': name
+            'name': name,
+            'unit': unit
         }
+
+        # Update Y-label if this is the first sensor or selected
+        if len(self.sensors) == 1:
+            self._selected_sensor_id = sensor_id
+            self._update_y_label_for_sensor(sensor_id)
 
     def update_sensor(self, sensor_id: str, value: float, timestamp: float = None) -> None:
         """
@@ -232,6 +258,55 @@ class MultiSensorOscilloscope(pg.PlotWidget):
         """Show/hide a sensor trace."""
         if sensor_id in self.sensors:
             self.sensors[sensor_id]['curve'].setVisible(visible)
+
+    def select_sensor(self, sensor_id: str) -> None:
+        """
+        Select a sensor to display its unit on Y-axis.
+        
+        Args:
+            sensor_id: Sensor identifier to select
+        """
+        if sensor_id in self.sensors:
+            self._selected_sensor_id = sensor_id
+            self._update_y_label_for_sensor(sensor_id)
+
+    def _update_y_label_for_sensor(self, sensor_id: str) -> None:
+        """
+        Update Y-axis label based on selected sensor's unit.
+        
+        Args:
+            sensor_id: Sensor identifier
+        """
+        if sensor_id not in self.sensors:
+            return
+        
+        sensor = self.sensors[sensor_id]
+        unit = sensor.get('unit', '')
+        name = sensor.get('name', 'Value')
+        
+        if unit:
+            self.setLabel('left', name, units=unit)
+            self._current_y_label = name
+            self._current_y_unit = unit
+        else:
+            self.setLabel('left', name)
+            self._current_y_label = name
+            self._current_y_unit = ''
+
+    def set_y_unit(self, unit: str, label: str = "Value") -> None:
+        """
+        Manually set Y-axis unit and label.
+        
+        Args:
+            unit: Unit string (e.g., 'V', '°C', 'mg/L')
+            label: Label text
+        """
+        self._current_y_label = label
+        self._current_y_unit = unit
+        if unit:
+            self.setLabel('left', label, units=unit)
+        else:
+            self.setLabel('left', label)
 
 
 

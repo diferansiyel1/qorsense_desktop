@@ -65,6 +65,12 @@
             "sensor_type": "Viscozite",
             "unit": "cP",
             "category": "\u00d6zel (Custom)"
+          },
+          {
+            "name": "test3",
+            "sensor_type": "pH Sensor",
+            "unit": "pH",
+            "category": "Process Analytics"
           }
         ]
       }
