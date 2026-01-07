@@ -57,34 +57,128 @@ class LicenseManager:
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             self.license_file = os.path.join(base_dir, LICENSE_FILE)
 
+    # Cache file for persistent machine ID
+    _MACHINE_ID_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".qorsense")
+    _MACHINE_ID_CACHE_FILE = os.path.join(_MACHINE_ID_CACHE_DIR, "machine_id.cache")
+
     def get_machine_id(self) -> str:
         """
-        Generate a unique machine fingerprint.
+        Generate a unique, stable machine fingerprint.
         
-        Combines:
-        - MAC address (uuid.getnode())
-        - Hostname (platform.node())
+        Uses platform-specific hardware identifiers:
+        - Windows: BIOS UUID via WMI
+        - macOS: IOPlatformUUID via ioreg
+        - Fallback: MAC address + hostname
+        
+        The ID is cached to a file for consistency across restarts.
         
         Returns:
-            SHA-256 hash of the combined identifiers (first 32 chars)
+            SHA-256 hash of the hardware identifier (first 32 chars)
         """
         try:
-            mac_address = str(uuid.getnode())
-            hostname = platform.node()
+            # 1. Check cache first for consistency
+            cached_id = self._load_cached_machine_id()
+            if cached_id:
+                logger.debug(f"Using cached machine ID: {cached_id[:8]}...")
+                return cached_id
 
-            # Combine identifiers
-            raw_id = f"{mac_address}:{hostname}"
+            # 2. Get platform-specific hardware identifier
+            system = platform.system()
+            if system == "Windows":
+                hardware_id = self._get_windows_uuid()
+            elif system == "Darwin":
+                hardware_id = self._get_macos_uuid()
+            else:
+                hardware_id = self._get_fallback_id()
 
-            # Hash the combination
-            hash_obj = hashlib.sha256(raw_id.encode('utf-8'))
+            # 3. Hash the hardware ID
+            hash_obj = hashlib.sha256(hardware_id.encode('utf-8'))
             machine_id = hash_obj.hexdigest()[:32].upper()
 
-            logger.debug(f"Generated machine ID: {machine_id}")
+            # 4. Cache for future consistency
+            self._save_cached_machine_id(machine_id)
+
+            logger.debug(f"Generated machine ID: {machine_id[:8]}...")
             return machine_id
 
         except Exception as e:
             logger.error(f"Error generating machine ID: {e}")
             raise RuntimeError(f"Failed to generate machine ID: {e}")
+
+    def _get_windows_uuid(self) -> str:
+        """Get BIOS UUID on Windows using WMI."""
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["wmic", "csproduct", "get", "UUID"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+            lines = result.stdout.strip().split('\n')
+            if len(lines) >= 2:
+                uuid_value = lines[1].strip()
+                if uuid_value and uuid_value != "":
+                    logger.debug("Retrieved Windows BIOS UUID")
+                    return uuid_value
+        except Exception as e:
+            logger.warning(f"Failed to get Windows UUID: {e}")
+        
+        # Fallback if WMI fails
+        return self._get_fallback_id()
+
+    def _get_macos_uuid(self) -> str:
+        """Get IOPlatformUUID on macOS using ioreg."""
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            import re
+            match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', result.stdout)
+            if match:
+                uuid_value = match.group(1)
+                logger.debug("Retrieved macOS IOPlatformUUID")
+                return uuid_value
+        except Exception as e:
+            logger.warning(f"Failed to get macOS UUID: {e}")
+        
+        # Fallback if ioreg fails
+        return self._get_fallback_id()
+
+    def _get_fallback_id(self) -> str:
+        """Fallback: use MAC address + hostname."""
+        mac_address = str(uuid.getnode())
+        hostname = platform.node()
+        fallback_id = f"{mac_address}:{hostname}"
+        logger.debug("Using fallback ID (MAC + hostname)")
+        return fallback_id
+
+    def _load_cached_machine_id(self) -> str | None:
+        """Load cached machine ID from file."""
+        try:
+            if os.path.exists(self._MACHINE_ID_CACHE_FILE):
+                with open(self._MACHINE_ID_CACHE_FILE, 'r', encoding='utf-8') as f:
+                    cached_id = f.read().strip()
+                    if cached_id and len(cached_id) == 32:
+                        return cached_id
+        except Exception as e:
+            logger.debug(f"Could not load cached machine ID: {e}")
+        return None
+
+    def _save_cached_machine_id(self, machine_id: str) -> None:
+        """Save machine ID to cache file for consistency."""
+        try:
+            os.makedirs(self._MACHINE_ID_CACHE_DIR, exist_ok=True)
+            with open(self._MACHINE_ID_CACHE_FILE, 'w', encoding='utf-8') as f:
+                f.write(machine_id)
+            logger.debug(f"Cached machine ID to {self._MACHINE_ID_CACHE_FILE}")
+        except Exception as e:
+            logger.warning(f"Could not cache machine ID: {e}")
 
     def generate_license_key(self, machine_id: str) -> str:
         """

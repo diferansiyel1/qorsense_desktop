@@ -316,7 +316,9 @@ class ConnectionDialog(QDialog):
             "tcp_port": self.tcp_port_input.value(),
             "register_address": self.tcp_register_input.value(),
             "slave_id": self.tcp_slave_input.value(),
-            "scale_factor": self.tcp_scale_input.value()
+            "scale_factor": self.tcp_scale_input.value(),
+            "sensor_type": self.type_combo.currentText(),
+            "unit": self.unit_combo.currentText()
         }
 
     def get_rtu_config(self) -> dict:
@@ -341,7 +343,9 @@ class ConnectionDialog(QDialog):
             "value_register_offset": self.rtu_value_offset_input.value(),
             "data_type": self.rtu_datatype_combo.currentText(),
             "slave_id": self.rtu_slave_input.value(),
-            "scale_factor": self.rtu_scale_input.value()
+            "scale_factor": self.rtu_scale_input.value(),
+            "sensor_type": self.type_combo.currentText(),
+            "unit": self.unit_combo.currentText()
         }
 
     def get_modbus_config(self) -> dict:
@@ -995,6 +999,11 @@ class QorSenseMainWindow(QMainWindow):
 
         # Clear oscilloscope buffer
         self.dashboard.oscilloscope.clear_realtime_buffer()
+
+        # Update oscilloscope Y-axis with sensor unit
+        sensor_unit = config.get("unit", "V")
+        sensor_type = config.get("sensor_type", "Amplitude")
+        self.dashboard.oscilloscope.set_y_unit(sensor_unit, sensor_type)
 
         # Create worker based on connection type
         if connection_type == "TCP":

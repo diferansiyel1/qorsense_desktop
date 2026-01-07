@@ -37,6 +37,18 @@
           },
           {
             "name": "OD"
+          },
+          {
+            "name": "visco2",
+            "sensor_type": "Viscosity",
+            "unit": "cP",
+            "category": "Custom"
+          },
+          {
+            "name": "visco3",
+            "sensor_type": "Viscosity",
+            "unit": "cP",
+            "category": "Custom"
           }
         ]
       }
