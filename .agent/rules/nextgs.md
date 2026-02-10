@@ -1,5 +1,5 @@
 ---
-trigger: always_on
+trigger: model_decision
 ---
 
 You are an expert in Next.js App Router.

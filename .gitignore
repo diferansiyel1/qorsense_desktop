@@ -34,7 +34,7 @@ Thumbs.db
 *.png
 !logo.png
 !qorsense_logo_v2.png
-backend.log
+logs/
 *.db
 license.dat
 data/

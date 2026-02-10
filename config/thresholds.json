@@ -1,0 +1,21 @@
+{
+    "defaults": {
+        "sampen_min": 0.05,
+        "stddev_min": 0.001,
+        "kurtosis_limit": 5.0,
+        "lyapunov_chaos": 0.1,
+        "lyapunov_stable": 0.05,
+        "spectral_limit": 45.0,
+        "ae_high": 0.05,
+        "ae_medium": 0.02,
+        "hysteresis_limit": 0.15,
+        "slope_normal": 0.001,
+        "slope_limit": 0.005
+    },
+    "PH_SENSOR": {
+        "slope_min": 0.85
+    },
+    "DO_SENSOR": {
+        "slope_min": 0.80
+    }
+}

@@ -17,6 +17,9 @@ from desktop_app.ui.multi_sensor_dialog import MultiSensorConnectionDialog
 from desktop_app.ui.panels import AlarmPanel, FieldExplorerPanel
 from desktop_app.ui.results_panel import ResultsPanel
 from desktop_app.ui.sensor_status_panel import SensorStatusPanel
+from desktop_app.ui.settings_dialog import SettingsDialog
+from desktop_app.ui.metadata_dialog import MetadataDialog, SensorMetadata
+from desktop_app.ui.views.diagnosis_dashboard import DetailedAnalysisWidget
 from desktop_app.workers.analysis_worker import AnalysisWorker
 from desktop_app.workers.file_loader import FileLoadWorker
 
@@ -28,6 +31,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDockWidget,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -44,6 +48,7 @@ from PyQt6.QtWidgets import (
     QRadioButton,
     QSpinBox,
     QStackedWidget,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -402,6 +407,8 @@ class QorSenseMainWindow(QMainWindow):
         self.current_data = None
         self.current_sensor_path = None
         self.sampling_rate = 1.0
+        self.sensor_type = "GENERIC"  # Current sensor type for analysis
+        self.sensor_unit = "units"    # Current sensor unit
 
         # Workers
         self.loader_worker = None # For file loading
@@ -421,8 +428,8 @@ class QorSenseMainWindow(QMainWindow):
         self.setup_ui()
 
     def setup_ui(self):
-        # 1. Central Dashboard
-        self.dashboard = AnalysisDashboard() # Charts
+        # 1. Central Dashboard (Signal View)
+        self.dashboard = AnalysisDashboard()  # Charts
 
         # Multi-sensor oscilloscope for live data
         self.multi_oscilloscope = MultiSensorOscilloscope(max_points=300)
@@ -430,27 +437,77 @@ class QorSenseMainWindow(QMainWindow):
         # 2. Control Stripe (Top)
         control_panel = self.create_control_panel()
 
-        # 3. Main Split (Left: Results/Charts, Right: Explorer... wait, sticking to layout)
-        # Actually, let's put ResultsPanel on the Right of Charts
+        # 3. AlarmPanel (embedded, not dock - for new layout)
+        self.panel_alarms = AlarmPanel(self)
+        self.panel_alarms.setTitleBarWidget(QWidget())  # Remove dock title bar
+        self.panel_alarms.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        alarm_widget = self.panel_alarms.widget()
+        alarm_widget.setMaximumHeight(180)
+        alarm_widget.setMinimumHeight(120)
 
-        lower_layout = QHBoxLayout()
-        lower_layout.addWidget(self.dashboard, stretch=1)
+        # 4. Left Column: Dashboard (charts) + Alarms (events)
+        left_column = QVBoxLayout()
+        left_column.setSpacing(5)
+        left_column.addWidget(self.dashboard, stretch=3)
+        left_column.addWidget(alarm_widget, stretch=0)
 
+        left_container = QWidget()
+        left_container.setLayout(left_column)
+
+        # 5. Right Column: Results Panel (full height)
         self.results_panel = ResultsPanel()
-        self.results_panel.setVisible(False) # Hide initially
-        lower_layout.addWidget(self.results_panel, stretch=0)
+        self.results_panel.setVisible(False)  # Hide initially
+
+        # 6. Main Split Layout for Signal View
+        signal_view_layout = QHBoxLayout()
+        signal_view_layout.setSpacing(5)
+        signal_view_layout.addWidget(left_container, stretch=1)
+        signal_view_layout.addWidget(self.results_panel, stretch=0)
+
+        signal_view_widget = QWidget()
+        signal_view_widget.setLayout(signal_view_layout)
+
+        # 7. Diagnosis Dashboard (NEW - Medical MRI View)
+        self.diagnosis_dashboard = DetailedAnalysisWidget()
+
+        # 8. TAB WIDGET - Switch between Signal View and Diagnosis Dashboard
+        self.main_tabs = QTabWidget()
+        self.main_tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #333;
+                background-color: #1e1e1e;
+            }
+            QTabBar::tab {
+                background-color: #2a2a2a;
+                color: #888;
+                padding: 10px 20px;
+                font-weight: bold;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background-color: #1e1e1e;
+                color: #00d2ff;
+            }
+            QTabBar::tab:hover {
+                color: #ededf2;
+            }
+        """)
+        self.main_tabs.addTab(signal_view_widget, "📊 Signal View")
+        self.main_tabs.addTab(self.diagnosis_dashboard, "🩺 Diagnosis Dashboard")
 
         # Combined Central Widget
         central_layout = QVBoxLayout()
         central_layout.setContentsMargins(5, 5, 5, 5)
         central_layout.addWidget(control_panel)
-        central_layout.addLayout(lower_layout)
+        central_layout.addWidget(self.main_tabs, stretch=1)
 
         central_widget = QWidget()
         central_widget.setLayout(central_layout)
         self.setCentralWidget(central_widget)
 
-        # 3. Docks
+        # 7. Docks (Explorer on left, Sensor Status on right)
         self.panel_explorer = FieldExplorerPanel(self)
         self.panel_explorer.sensor_selected.connect(self.on_sensor_selected)
         self.panel_explorer.load_csv_requested.connect(self.on_csv_load_requested)
@@ -464,9 +521,6 @@ class QorSenseMainWindow(QMainWindow):
         self.sensor_status_panel.sensor_selected.connect(self._on_live_sensor_selected)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.sensor_status_panel)
         self.sensor_status_panel.setVisible(False)  # Hidden until live mode
-
-        self.panel_alarms = AlarmPanel(self)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.panel_alarms)
 
         # 4. Status Bar
         self.status_label = QLabel("Ready")
@@ -559,8 +613,25 @@ class QorSenseMainWindow(QMainWindow):
         """)
         self.btn_multi_sensor.clicked.connect(self.show_multi_sensor_dialog)
 
+        # Settings Button (NEW - DiagnosisEngine configuration)
+        self.btn_settings = QPushButton("⚙️ Settings")
+        self.btn_settings.setMinimumHeight(40)
+        self.btn_settings.setStyleSheet("""
+            QPushButton { 
+                background-color: #555; 
+                color: white; 
+                font-weight: bold; 
+                border-radius: 4px;
+                padding: 0 15px;
+            }
+            QPushButton:hover { background-color: #666; }
+            QPushButton:pressed { background-color: #444; }
+        """)
+        self.btn_settings.clicked.connect(self.show_settings_dialog)
+
         layout.addWidget(self.btn_connect)
         layout.addWidget(self.btn_multi_sensor)
+        layout.addWidget(self.btn_settings)  # NEW
         layout.addWidget(self.btn_stop_live)
         layout.addWidget(self.btn_analyze)
         layout.addStretch()
@@ -586,6 +657,9 @@ class QorSenseMainWindow(QMainWindow):
         view_menu = menubar.addMenu("&View")
         view_menu.addAction("Toggle Explorer").triggered.connect(lambda: self.panel_explorer.setVisible(not self.panel_explorer.isVisible()))
         view_menu.addAction("Toggle Alarms").triggered.connect(lambda: self.panel_alarms.setVisible(not self.panel_alarms.isVisible()))
+        view_menu.addSeparator()
+        view_menu.addAction("📊 Signal View").triggered.connect(lambda: self.main_tabs.setCurrentIndex(0))
+        view_menu.addAction("🩺 Diagnosis Dashboard").triggered.connect(lambda: self.main_tabs.setCurrentIndex(1))
 
         sim_menu = menubar.addMenu("&Simulation")
 
@@ -664,32 +738,45 @@ class QorSenseMainWindow(QMainWindow):
 
             self.current_data = data_dict[value_col]
 
-            # --- Sampling Rate Logic ---
-            # If we don't have a time column, ask for Sampling Rate
+            # --- Show MetadataDialog for sensor configuration ---
+            # Check for time column to set default sampling rate
             time_col = None
             for col in data_dict.keys():
                 if 'time' in col.lower() or 'date' in col.lower():
                     time_col = col
                     break
 
+            # Show MetadataDialog for sensor configuration
+            metadata_dialog = MetadataDialog(
+                parent=self,
+                filename=os.path.basename(filepath)
+            )
+            
+            # Pre-fill with current settings if not default
+            if self.sensor_type != "GENERIC":
+                metadata_dialog.set_defaults(
+                    sensor_type=self.sensor_type,
+                    sampling_rate=self.sampling_rate,
+                    unit=self.sensor_unit
+                )
+            
+            if metadata_dialog.exec() != QDialog.DialogCode.Accepted:
+                self.status_label.setText("Load Cancelled - Configuration required")
+                self.current_data = None
+                return
+            
+            # Get metadata from dialog
+            metadata = metadata_dialog.get_metadata()
+            self.sensor_type = metadata.sensor_type
+            self.sampling_rate = metadata.sampling_rate
+            self.sensor_unit = metadata.unit
+            
+            logger.info(f"Sensor configured: type={self.sensor_type}, rate={self.sampling_rate}Hz, unit={self.sensor_unit}")
+
+            # Generate Time Axis
             time_axis = None
-            self.sampling_rate = 1.0
-
-            if time_col:
-                # Use existing time column (simplified, assuming floats or simple conversion)
-                # In real app, might need datetime parsing
-                pass
-            else:
-                # Ask User for Rate
-                rate, ok = QInputDialog.getDouble(self, "Sampling Rate",
-                                                "Enter Sampling Rate (Hz):\n(1.0 Hz = 1 sample/sec)",
-                                                value=1.0, min=0.001, max=100000.0, decimals=3)
-                if ok:
-                    self.sampling_rate = rate
-
-                # Generate Time Axis
-                n_points = len(self.current_data)
-                time_axis = np.arange(n_points) / self.sampling_rate
+            n_points = len(self.current_data)
+            time_axis = np.arange(n_points) / self.sampling_rate
 
             # Update UI
             self.dashboard.oscilloscope.update_data(self.current_data, x=time_axis)
@@ -698,11 +785,11 @@ class QorSenseMainWindow(QMainWindow):
             # Store data for this sensor
             if self.current_sensor_path:
                 self.sensor_data[self.current_sensor_path] = self.current_data
-                self.status_label.setText(f"Loaded {len(self.current_data)} pts → {self.current_sensor_path}")
+                self.status_label.setText(f"Loaded {len(self.current_data)} pts → {self.current_sensor_path} [{self.sensor_type}]")
             else:
-                self.status_label.setText(f"Loaded {len(self.current_data)} points (no sensor selected)")
+                self.status_label.setText(f"Loaded {len(self.current_data)} points [{self.sensor_type}]")
 
-            self.panel_alarms.add_alarm(datetime.now().strftime("%H:%M:%S"), "INFO", "System", f"File Loaded: {os.path.basename(filepath)}")
+            self.panel_alarms.add_alarm(datetime.now().strftime("%H:%M:%S"), "INFO", "System", f"File Loaded: {os.path.basename(filepath)} ({self.sensor_type})")
 
         except Exception as e:
              self.on_load_error(str(e))
@@ -762,7 +849,7 @@ class QorSenseMainWindow(QMainWindow):
 
             # Restore Metrics & Health
             self.results_panel.setVisible(True)
-            self.results_panel.update_results(result)
+            self.results_panel.update_results(result, sensor_type=self.sensor_type, sensor_unit=self.sensor_unit)
 
             # Restore Trend Chart
             metrics = result.get("metrics", {})
@@ -770,12 +857,17 @@ class QorSenseMainWindow(QMainWindow):
             residuals = metrics.get("residuals", [])
             self.dashboard.trend_view.update_data(trend, residuals)
 
+            # Restore Diagnosis Dashboard
+            raw_data = np.array(self.current_data) if self.current_data else None
+            self.diagnosis_dashboard.update_results(result, raw_data=raw_data)
+
             self.panel_alarms.add_alarm(datetime.now().strftime("%H:%M:%S"), "INFO", "System", f"Restored analysis for: {os.path.basename(self.current_sensor_path)}")
         else:
             # No cached analysis, clear view
             self.dashboard.trend_view.clear()
             self.results_panel.clear()
             self.results_panel.setVisible(False)
+            self.diagnosis_dashboard.clear()
 
 
     def on_load_error(self, error_msg):
@@ -888,7 +980,12 @@ class QorSenseMainWindow(QMainWindow):
         # Create a COPY of current_data to prevent race conditions
         data_to_analyze = list(self.current_data)
 
-        self.worker = AnalysisWorker(self.bridge, data_to_analyze)
+        self.worker = AnalysisWorker(
+            self.bridge, 
+            data_to_analyze,
+            sensor_type=self.sensor_type,
+            sampling_rate=self.sampling_rate,
+        )
         self.worker.finished.connect(self.on_analysis_finished)
         self.worker.error.connect(self.on_analysis_error)
         self.worker.start()
@@ -932,7 +1029,11 @@ class QorSenseMainWindow(QMainWindow):
 
         # Show Results Panel
         self.results_panel.setVisible(True)
-        self.results_panel.update_results(result)
+        self.results_panel.update_results(result, sensor_type=self.sensor_type, sensor_unit=self.sensor_unit)
+
+        # Update Diagnosis Dashboard with analysis results
+        raw_data = np.array(self.current_data) if self.current_data else None
+        self.diagnosis_dashboard.update_results(result, raw_data=raw_data)
 
     def on_analysis_error(self, error_msg):
         self.cleanup_worker()
@@ -1222,6 +1323,10 @@ class QorSenseMainWindow(QMainWindow):
 
             self.start_multi_sensor_monitoring(connection_type, connection_params, sensors)
 
+    def show_settings_dialog(self):
+        """Show settings dialog for DiagnosisEngine configuration."""
+        dialog = SettingsDialog(self)
+        dialog.exec()
     def start_multi_sensor_monitoring(self, connection_type: str, connection_params: dict, sensors: list):
         """
         Start monitoring multiple sensors.

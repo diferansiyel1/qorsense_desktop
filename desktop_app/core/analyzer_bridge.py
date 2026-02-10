@@ -39,25 +39,37 @@ class AnalyzerBridge:
             logger.error(f"Failed to initialize AnalyzerBridge: {e}")
             raise
 
-    def analyze_sensor_data(self, data: list[float]) -> dict[str, Any]:
+    def analyze_sensor_data(
+        self, 
+        data: list[float],
+        sensor_type: str = "GENERIC",
+        sampling_rate: float = 1.0,
+    ) -> dict[str, Any]:
         """
         Wraps the backend analysis function with error handling for UI.
         
         Args:
-            data (List[float]): Raw sensor data points.
+            data: Raw sensor data points.
+            sensor_type: Type of sensor for polymorphic diagnosis.
+            sampling_rate: Sampling rate in Hz for spectral analysis.
             
         Returns:
-            Dict: Analysis results or error dictionary.
+            Analysis results or error dictionary.
         """
         try:
             if not data:
                 logger.warning("Empty data received.")
                 return {"error": "Empty data received"}
 
-            # Create FRESH analyzer for each call to avoid any state caching
-            fresh_analyzer = SensorAnalyzer(self.config)
+            # Create FRESH analyzer for each call with sensor metadata
+            fresh_analyzer = SensorAnalyzer(
+                config=self.config,
+                sensor_type=sensor_type,
+                sampling_rate=sampling_rate,
+            )
 
-            logger.info(f"Analyzing {len(data)} points. First 3: {data[:3]}, Last 3: {data[-3:]}")
+            logger.info(f"Analyzing {len(data)} points. Sensor: {sensor_type}, Rate: {sampling_rate}Hz")
+            logger.info(f"First 3: {data[:3]}, Last 3: {data[-3:]}")
 
             # Call the backend logic with fresh analyzer
             result = fresh_analyzer.analyze(data)

@@ -55,7 +55,7 @@ class LicenseManager:
         else:
             # Default: license.dat in the same directory as this module's parent
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            self.license_file = os.path.join(base_dir, LICENSE_FILE)
+            self.license_file = os.path.join(base_dir, "config", LICENSE_FILE)
 
     # Cache file for persistent machine ID
     _MACHINE_ID_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".qorsense")

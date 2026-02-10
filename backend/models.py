@@ -76,8 +76,12 @@ class SensorLimitConfig(BaseModel):
         ...     noise_warning=0.1, noise_critical=0.2
         ... )
     """
-    # Sensor identification
-    sensor_type: Literal["pH", "DO", "Pressure", "Temperature", "Flow", "Conductivity", "Generic"] = "Generic"
+    # Sensor identification - expanded to match SENSOR_PROFILES keys
+    sensor_type: Literal[
+        "pH", "DO", "Pressure", "Temperature", "Flow", "Conductivity", "Generic",
+        "VISCOSITY", "PH", "FLOW_MAG", "FLOW_CORIOLIS", "TEMP", "PRESSURE", "CONDUCTIVITY",
+        "GENERIC"  # Added uppercase variant
+    ] = "Generic"
 
     # Slope thresholds (drift detection) - units per sample
     slope_warning: float = Field(default=0.05, ge=0, description="Warning threshold for drift rate")
